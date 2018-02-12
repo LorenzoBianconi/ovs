@@ -916,11 +916,18 @@ pinctrl_handle_dns_lookup(
     out_udp->udp_len = htons(new_l4_size);
     out_udp->udp_csum = 0;
 
-    struct ip_header *out_ip = dp_packet_l3(&pkt_out);
-    out_ip->ip_tot_len = htons(pkt_out.l4_ofs - pkt_out.l3_ofs + new_l4_size);
-    /* Checksum needs to be initialized to zero. */
-    out_ip->ip_csum = 0;
-    out_ip->ip_csum = csum(out_ip, sizeof *out_ip);
+    struct eth_header *eth = dp_packet_data(&pkt_out);
+    if (eth->eth_type == htons(ETH_TYPE_IP)) {
+        struct ip_header *out_ip = dp_packet_l3(&pkt_out);
+        out_ip->ip_tot_len = htons(pkt_out.l4_ofs - pkt_out.l3_ofs
+                                   + new_l4_size);
+        /* Checksum needs to be initialized to zero. */
+        out_ip->ip_csum = 0;
+        out_ip->ip_csum = csum(out_ip, sizeof *out_ip);
+    } else {
+        struct ovs_16aligned_ip6_hdr *nh = dp_packet_l3(&pkt_out);
+        nh->ip6_plen = htons(new_l4_size);
+    }
 
     pin->packet = dp_packet_data(&pkt_out);
     pin->packet_len = dp_packet_size(&pkt_out);
@@ -1039,7 +1046,7 @@ pinctrl_recv(const struct ofp_header *oh, enum ofptype type,
         if (VLOG_IS_DBG_ENABLED()) {
             static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(30, 300);
 
-            char *s = ofp_to_string(oh, ntohs(oh->length), NULL, 2);
+            char *s = ofp_to_string(oh, ntohs(oh->length), NULL, NULL, 2);
 
             VLOG_DBG_RL(&rl, "OpenFlow packet ignored: %s", s);
             free(s);
@@ -1371,6 +1378,7 @@ send_ipv6_ras(const struct controller_ctx *ctx, struct hmap *local_datapaths)
                 send_ipv6_ra_time = next_ra;
             }
         }
+        sbrec_port_binding_index_destroy_row(lpval);
     }
 
     /* Remove those that are no longer in the SB database */
