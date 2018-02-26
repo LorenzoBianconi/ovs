@@ -1755,10 +1755,6 @@ tcp.flags = RST;
             updates the TCP checksum.
           </p>
 
-          <p>
-            Details TBD.
-          </p>
-
           <p><b>Prerequisite:</b> <code>tcp</code></p>
         </dd>
       </dl>
