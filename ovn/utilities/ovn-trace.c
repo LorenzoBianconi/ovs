@@ -1560,6 +1560,14 @@ execute_icmp4(const struct ovnact_nest *on,
 }
 
 static void
+execute_tcp_reset(const struct ovnact_nest *on,
+                  const struct ovntrace_datapath *dp,
+                  const struct flow *uflow, uint8_t table_id,
+                  enum ovnact_pipeline pipeline, struct ovs_list *super)
+{
+}
+
+static void
 execute_get_mac_bind(const struct ovnact_get_mac_bind *bind,
                      const struct ovntrace_datapath *dp,
                      struct flow *uflow, struct ovs_list *super)
@@ -1921,6 +1929,11 @@ trace_actions(const struct ovnact *ovnacts, size_t ovnacts_len,
         case OVNACT_ICMP4:
             execute_icmp4(ovnact_get_ICMP4(a), dp, uflow, table_id, pipeline,
                           super);
+            break;
+
+        case OVNACT_TCP_RESET:
+            execute_tcp_reset(ovnact_get_TCP_RESET(a), dp, uflow, table_id,
+                              pipeline, super);
             break;
         }
 
