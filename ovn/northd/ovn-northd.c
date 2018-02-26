@@ -3103,13 +3103,15 @@ build_reject_acl_rules(struct ovn_datapath *od, struct hmap *lflows,
     struct ds actions = DS_EMPTY_INITIALIZER;
     bool ingress = (stage == S_SWITCH_IN_ACL);
 
-    /* XXX: Treat TCP connections as "drop;" for now */
     build_acl_log(&actions, acl);
     if (extra_match->length > 0) {
         ds_put_format(&match, "(%s) && ", extra_match->string);
     }
     ds_put_format(&match, "ip && tcp && (%s)", acl->match);
-    ds_put_cstr(&actions, "/* drop */");
+    ds_put_format(&actions, "reg0 = 0; "
+                  "eth.dst <-> eth.src; ip4.dst <-> ip4.src; "
+                  "tcp_reset { outport <-> inport; %s };",
+                  ingress ? "output;" : "next(pipeline=ingress,table=0);");
     ovn_lflow_add(lflows, od, stage, acl->priority + OVN_ACL_PRI_OFFSET,
                   ds_cstr(&match), ds_cstr(&actions));
 
