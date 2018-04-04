@@ -86,6 +86,7 @@ TESTSUITE_AT = \
 	tests/ovsdb-idl.at \
 	tests/ovsdb-lock.at \
 	tests/ovsdb-rbac.at \
+	tests/ovsdb-cluster.at \
 	tests/ovs-vsctl.at \
 	tests/ovs-xapi-sync.at \
 	tests/stp.at \
@@ -364,7 +365,8 @@ tests_ovstest_SOURCES = \
 	tests/test-uuid.c \
 	tests/test-bitmap.c \
 	tests/test-vconn.c \
-	tests/test-aa.c
+	tests/test-aa.c \
+	tests/test-stopwatch.c
 
 if !WIN32
 tests_ovstest_SOURCES += \
