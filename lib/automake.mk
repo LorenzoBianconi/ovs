@@ -219,6 +219,8 @@ lib_libopenvswitch_la_SOURCES = \
 	lib/ovsdb-session.h \
 	lib/ovsdb-types.c \
 	lib/ovsdb-types.h \
+	lib/ox-stat.c \
+	lib/ox-stat.h \
 	lib/packets.c \
 	lib/packets.h \
 	lib/pcap-file.c \
@@ -492,6 +494,7 @@ MAN_FRAGMENTS += \
 	lib/dpctl.man \
 	lib/memory-unixctl.man \
 	lib/netdev-dpdk-unixctl.man \
+	lib/dpif-netdev-unixctl.man \
 	lib/ofp-version.man \
 	lib/ovs.tmac \
 	lib/service.man \

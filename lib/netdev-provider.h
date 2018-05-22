@@ -314,7 +314,8 @@ struct netdev_class {
      * flow.  Push header is called for packet to build header specific to
      * a packet on actual transmit.  It uses partial header build by
      * build_header() which is passed as data. */
-    void (*push_header)(struct dp_packet *packet,
+    void (*push_header)(const struct netdev *,
+                        struct dp_packet *packet,
                         const struct ovs_action_push_tnl *data);
 
     /* Pop tunnel header from packet, build tunnel metadata and resize packet
@@ -789,9 +790,15 @@ struct netdev_class {
      * Implementations should allocate buffers with DP_NETDEV_HEADROOM bytes of
      * headroom.
      *
+     * If the caller provides a non-NULL qfill pointer, the implementation
+     * should return the number (zero or more) of remaining packets in the
+     * queue after the reception the current batch, if it supports that,
+     * or -ENOTSUP otherwise.
+     *
      * Returns EAGAIN immediately if no packet is ready to be received or
      * another positive errno value if an error was encountered. */
-    int (*rxq_recv)(struct netdev_rxq *rx, struct dp_packet_batch *batch);
+    int (*rxq_recv)(struct netdev_rxq *rx, struct dp_packet_batch *batch,
+                    int *qfill);
 
     /* Registers with the poll loop to wake up from the next call to
      * poll_block() when a packet is ready to be received with

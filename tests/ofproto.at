@@ -357,19 +357,41 @@ AT_CLEANUP
 dnl This is really bare-bones.
 dnl It at least checks request and reply serialization and deserialization.
 dnl Actions definition listed in both supported formats (w/ actions=)
-AT_SETUP([ofproto - no group support (OpenFlow 1.0)])
+AT_SETUP([ofproto - del group (OpenFlow 1.0 extension)])
 OVS_VSWITCHD_START
 AT_DATA([groups.txt], [dnl
-group_id=1234,type=all,bucket=output:10
-group_id=1235,type=all,bucket=actions=output:10
+group_id=1233,type=select,selection_method=hash,bucket=output:10,bucket=output:11
+group_id=1234,type=select,selection_method=hash,fields(eth_dst,ip_dst,tcp_dst),bucket=output:10,bucket=output:11
+group_id=1235,type=all,bucket=actions=output:12,bucket=bucket_id:0,actions=output:10,bucket=bucket_id:1,actions=output:11
+group_id=1236,type=select,selection_method=dp_hash,bucket=output:10,bucket=output:11
 ])
-AT_DATA([stderr], [dnl
-ovs-ofctl: none of the usable flow formats (OXM,OpenFlow11) is among the allowed flow formats (OpenFlow10,NXM)
+AT_CHECK([ovs-ofctl -O OpenFlow10 -vwarn add-groups br0 groups.txt])
+AT_CHECK([ovs-ofctl -O OpenFlow10 -vwarn dump-groups br0 1234], [0], [stdout])
+AT_CHECK([strip_xids < stdout], [0], [dnl
+NXST_GROUP_DESC reply:
+ group_id=1234,type=select,selection_method=hash,fields(eth_dst,ip_dst,tcp_dst),bucket=bucket_id:0,actions=output:10,bucket=bucket_id:1,actions=output:11
 ])
-AT_CHECK([ovs-ofctl -O OpenFlow10 -vwarn add-groups br0 groups.txt], [1], ,[stderr])
-AT_CHECK([ovs-ofctl -O OpenFlow10 -vwarn mod-group br0 'group_id=1234,type=all,bucket=output:10'], [1], ,[stderr])
-AT_CHECK([ovs-ofctl -O OpenFlow10 -vwarn del-groups br0], [1], ,[stderr])
-AT_CHECK([ovs-ofctl -O OpenFlow10 -vwarn dump-groups br0 ], [1], ,[stderr])
+AT_CHECK([ovs-ofctl -O OpenFlow10 -vwarn del-groups br0 group_id=1234])
+AT_CHECK([ovs-ofctl -O OpenFlow10 -vwarn dump-groups br0], [0], [stdout])
+AT_CHECK([strip_xids < stdout | sort], [0], [dnl
+ group_id=1233,type=select,selection_method=hash,bucket=bucket_id:0,actions=output:10,bucket=bucket_id:1,actions=output:11
+ group_id=1235,type=all,bucket=bucket_id:2,actions=output:12,bucket=bucket_id:0,actions=output:10,bucket=bucket_id:1,actions=output:11
+ group_id=1236,type=select,selection_method=dp_hash,bucket=bucket_id:0,actions=output:10,bucket=bucket_id:1,actions=output:11
+NXST_GROUP_DESC reply:
+])
+AT_CHECK([ovs-ofctl -O OpenFlow10 -vwarn del-groups br0 group_id=1234])
+AT_CHECK([ovs-ofctl -O OpenFlow10 -vwarn dump-groups br0], [0], [stdout])
+AT_CHECK([strip_xids < stdout | sort], [0], [dnl
+ group_id=1233,type=select,selection_method=hash,bucket=bucket_id:0,actions=output:10,bucket=bucket_id:1,actions=output:11
+ group_id=1235,type=all,bucket=bucket_id:2,actions=output:12,bucket=bucket_id:0,actions=output:10,bucket=bucket_id:1,actions=output:11
+ group_id=1236,type=select,selection_method=dp_hash,bucket=bucket_id:0,actions=output:10,bucket=bucket_id:1,actions=output:11
+NXST_GROUP_DESC reply:
+])
+AT_CHECK([ovs-ofctl -O OpenFlow10 -vwarn del-groups br0], [0])
+AT_CHECK([ovs-ofctl -O OpenFlow10 -vwarn dump-groups br0], [0], [stdout])
+AT_CHECK([strip_xids < stdout], [0], [dnl
+NXST_GROUP_DESC reply:
+])
 OVS_VSWITCHD_STOP
 AT_CLEANUP
 
@@ -711,7 +733,7 @@ OFPT_GROUP_MOD (OF1.5):
 ])
 # Negative test.
 AT_CHECK([ovs-ofctl -O OpenFlow11 -vwarn remove-buckets br0 group_id=1234,command_bucket_id=last], [1], [],
-  [ovs-ofctl: remove-bucket needs OpenFlow 1.5 or later ('-O OpenFlow15')
+  [ovs-ofctl: none of the usable flow formats (OpenFlow10,NXM,OXM-OpenFlow15,OXM-OpenFlow16) is among the allowed flow formats (OpenFlow11)
 ])
 OVS_VSWITCHD_STOP
 AT_CLEANUP
@@ -1018,7 +1040,7 @@ Error OFPBFC_MSG_FAILED for: OFPT_BUNDLE_CONTROL (OF1.5):
 ])
 # Negative test.
 AT_CHECK([ovs-ofctl --bundle -O OpenFlow11 -vwarn remove-buckets br0 group_id=1234,command_bucket_id=last], [1], [],
-  [ovs-ofctl: remove-bucket needs OpenFlow 1.5 or later ('-O OpenFlow15')
+  [ovs-ofctl: none of the usable flow formats (OXM-OpenFlow15,OXM-OpenFlow16) is among the allowed flow formats (OXM-OpenFlow14)
 ])
 OVS_VSWITCHD_STOP
 AT_CLEANUP
@@ -1075,20 +1097,33 @@ AT_CLEANUP
 
 dnl This is really bare-bones.
 dnl It at least checks request and reply serialization and deserialization.
-AT_SETUP([ofproto - group description])
+AT_SETUP([ofproto - group features (OpenFlow 1.0 extension)])
 OVS_VSWITCHD_START
-AT_CHECK([ovs-ofctl -O OpenFlow11 -vwarn add-group br0 group_id=1234,type=all,bucket=output:10])
-AT_CHECK([ovs-ofctl -O OpenFlow11 -vwarn dump-groups br0], [0], [stdout])
+AT_CHECK([ovs-ofctl -O OpenFlow10 -vwarn dump-group-features br0], [0], [stdout])
 AT_CHECK([strip_xids < stdout], [0], [dnl
-OFPST_GROUP_DESC reply (OF1.1):
- group_id=1234,type=all,bucket=actions=output:10
+NXST_GROUP_FEATURES reply:
+ Group table:
+    Types:  0xf
+    Capabilities:  0x7
+    all group:
+       max_groups=0xffffff00
+       actions: output enqueue set_vlan_vid set_vlan_pcp strip_vlan mod_dl_src mod_dl_dst mod_nw_src mod_nw_dst mod_nw_tos mod_tp_src mod_tp_dst
+    select group:
+       max_groups=0xffffff00
+       actions: output enqueue set_vlan_vid set_vlan_pcp strip_vlan mod_dl_src mod_dl_dst mod_nw_src mod_nw_dst mod_nw_tos mod_tp_src mod_tp_dst
+    indirect group:
+       max_groups=0xffffff00
+       actions: output enqueue set_vlan_vid set_vlan_pcp strip_vlan mod_dl_src mod_dl_dst mod_nw_src mod_nw_dst mod_nw_tos mod_tp_src mod_tp_dst
+    fast failover group:
+       max_groups=0xffffff00
+       actions: output enqueue set_vlan_vid set_vlan_pcp strip_vlan mod_dl_src mod_dl_dst mod_nw_src mod_nw_dst mod_nw_tos mod_tp_src mod_tp_dst
 ])
 OVS_VSWITCHD_STOP
 AT_CLEANUP
 
 dnl This is really bare-bones.
 dnl It at least checks request and reply serialization and deserialization.
-AT_SETUP([ofproto - group features])
+AT_SETUP([ofproto - group features (OpenFlow 1.2)])
 OVS_VSWITCHD_START
 AT_CHECK([ovs-ofctl -O OpenFlow12 -vwarn dump-group-features br0], [0], [stdout])
 AT_CHECK([strip_xids < stdout], [0], [dnl
@@ -1108,6 +1143,30 @@ OFPST_GROUP_FEATURES reply (OF1.2):
     fast failover group:
        max_groups=0xffffff00
        actions: output group set_field strip_vlan push_vlan mod_nw_ttl dec_ttl set_mpls_ttl dec_mpls_ttl push_mpls pop_mpls set_queue
+])
+OVS_VSWITCHD_STOP
+AT_CLEANUP
+
+dnl This is really bare-bones.
+dnl It at least checks request and reply serialization and deserialization.
+AT_SETUP([ofproto - group stats (OpenFlow 1.0 extension)])
+OVS_VSWITCHD_START
+AT_DATA([groups.txt], [dnl
+group_id=1234,type=all,bucket=output:10
+group_id=1235,type=all,bucket=output:10
+])
+AT_CHECK([ovs-ofctl -O OpenFlow10 -vwarn add-groups br0 groups.txt])
+AT_CHECK([ovs-ofctl -O OpenFlow10 -vwarn add-flow br0 'tcp actions=group:1234'])
+AT_CHECK([ovs-ofctl -O OpenFlow10 -vwarn dump-group-stats br0 group_id=1234], [0], [stdout])
+AT_CHECK([strip_xids < stdout | sed 's/duration=[[0-9.]]*s/duration=?s/' | sort], [0], [dnl
+ group_id=1234,duration=?s,ref_count=1,packet_count=0,byte_count=0,bucket0:packet_count=0,byte_count=0
+NXST_GROUP reply:
+])
+AT_CHECK([ovs-ofctl -O OpenFlow10 -vwarn dump-group-stats br0], [0], [stdout])
+AT_CHECK([strip_xids < stdout | sed 's/duration=[[0-9.]]*s/duration=?s/' | sort], [0], [dnl
+ group_id=1234,duration=?s,ref_count=1,packet_count=0,byte_count=0,bucket0:packet_count=0,byte_count=0
+ group_id=1235,duration=?s,ref_count=0,packet_count=0,byte_count=0,bucket0:packet_count=0,byte_count=0
+NXST_GROUP reply:
 ])
 OVS_VSWITCHD_STOP
 AT_CLEANUP
@@ -1402,6 +1461,7 @@ AT_CHECK([ovs-ofctl -O OpenFlow14 dump-flows br0 | ofctl_strip], [0], [dnl
 OFPST_FLOW reply (OF1.4):
  check_overlap reset_counts in_port=1 actions=drop
 ])
+# OF1.5 makes the flags invisible.
 AT_CHECK([ovs-ofctl -O OpenFlow15 dump-flows br0 | ofctl_strip], [0], [dnl
 OFPST_FLOW reply (OF1.5):
  check_overlap reset_counts in_port=1 actions=drop
@@ -2394,7 +2454,7 @@ head_table () {
       instructions: meter,apply_actions,clear_actions,write_actions,write_metadata,goto_table
       Write-Actions and Apply-Actions features:
         actions: output group set_field strip_vlan push_vlan mod_nw_ttl dec_ttl set_mpls_ttl dec_mpls_ttl push_mpls pop_mpls set_queue
-        supported on Set-Field: tun_id tun_src tun_dst tun_ipv6_src tun_ipv6_dst tun_flags tun_gbp_id tun_gbp_flags tun_metadata0 dnl
+        supported on Set-Field: tun_id tun_src tun_dst tun_ipv6_src tun_ipv6_dst tun_flags tun_gbp_id tun_gbp_flags tun_erspan_idx tun_erspan_ver tun_erspan_dir tun_erspan_hwid tun_metadata0 dnl
 tun_metadata1 tun_metadata2 tun_metadata3 tun_metadata4 tun_metadata5 tun_metadata6 tun_metadata7 tun_metadata8 tun_metadata9 tun_metadata10 tun_metadata11 tun_metadata12 tun_metadata13 tun_metadata14 tun_metadata15 tun_metadata16 tun_metadata17 tun_metadata18 tun_metadata19 tun_metadata20 tun_metadata21 tun_metadata22 tun_metadata23 tun_metadata24 tun_metadata25 tun_metadata26 tun_metadata27 tun_metadata28 tun_metadata29 tun_metadata30 tun_metadata31 tun_metadata32 tun_metadata33 tun_metadata34 tun_metadata35 tun_metadata36 tun_metadata37 tun_metadata38 tun_metadata39 tun_metadata40 tun_metadata41 tun_metadata42 tun_metadata43 tun_metadata44 tun_metadata45 tun_metadata46 tun_metadata47 tun_metadata48 tun_metadata49 tun_metadata50 tun_metadata51 tun_metadata52 tun_metadata53 tun_metadata54 tun_metadata55 tun_metadata56 tun_metadata57 tun_metadata58 tun_metadata59 tun_metadata60 tun_metadata61 tun_metadata62 tun_metadata63 dnl
 metadata in_port in_port_oxm pkt_mark ct_mark ct_label reg0 reg1 reg2 reg3 reg4 reg5 reg6 reg7 reg8 reg9 reg10 reg11 reg12 reg13 reg14 reg15 xreg0 xreg1 xreg2 xreg3 xreg4 xreg5 xreg6 xreg7 xxreg0 xxreg1 xxreg2 xxreg3 eth_src eth_dst vlan_tci vlan_vid vlan_pcp mpls_label mpls_tc mpls_ttl ip_src ip_dst ipv6_src ipv6_dst ipv6_label nw_tos ip_dscp nw_ecn nw_ttl arp_op arp_spa arp_tpa arp_sha arp_tha tcp_src tcp_dst udp_src udp_dst sctp_src sctp_dst icmp_type icmp_code icmpv6_type icmpv6_code nd_target nd_sll nd_tll nsh_flags nsh_spi nsh_si nsh_c1 nsh_c2 nsh_c3 nsh_c4 nsh_ttl
     matching:
@@ -2410,6 +2470,10 @@ metadata in_port in_port_oxm pkt_mark ct_mark ct_label reg0 reg1 reg2 reg3 reg4 
       tun_flags: arbitrary mask
       tun_gbp_id: arbitrary mask
       tun_gbp_flags: arbitrary mask
+      tun_erspan_idx: arbitrary mask
+      tun_erspan_ver: arbitrary mask
+      tun_erspan_dir: arbitrary mask
+      tun_erspan_hwid: arbitrary mask
       tun_metadata0: arbitrary mask
       tun_metadata1: arbitrary mask
       tun_metadata2: arbitrary mask

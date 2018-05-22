@@ -177,7 +177,7 @@ ct_state = NXM_NX_CT_STATE
 ]])
 AT_CLEANUP
 
-AT_SETUP([ovn -- compsition])
+AT_SETUP([ovn -- composition])
 AT_CHECK([ovstest test-ovn composition 2], [0], [ignore])
 AT_CLEANUP
 
@@ -1032,6 +1032,11 @@ nd_ns { };
 nd_na { eth.src = 12:34:56:78:9a:bc; nd.tll = 12:34:56:78:9a:bc; outport = inport; inport = ""; /* Allow sending out inport. */ output; };
     formats as nd_na { eth.src = 12:34:56:78:9a:bc; nd.tll = 12:34:56:78:9a:bc; outport = inport; inport = ""; output; };
     encodes as controller(userdata=00.00.00.03.00.00.00.00.00.19.00.10.80.00.08.06.12.34.56.78.9a.bc.00.00.00.19.00.10.80.00.42.06.12.34.56.78.9a.bc.00.00.ff.ff.00.18.00.00.23.20.00.06.00.20.00.00.00.00.00.01.1c.04.00.01.1e.04.00.19.00.10.00.01.1c.04.00.00.00.00.00.00.00.00.ff.ff.00.10.00.00.23.20.00.0e.ff.f8.40.00.00.00)
+    has prereqs nd_ns
+# nd_na_router
+nd_na_router { eth.src = 12:34:56:78:9a:bc; nd.tll = 12:34:56:78:9a:bc; outport = inport; inport = ""; /* Allow sending out inport. */ output; };
+    formats as nd_na_router { eth.src = 12:34:56:78:9a:bc; nd.tll = 12:34:56:78:9a:bc; outport = inport; inport = ""; output; };
+    encodes as controller(userdata=00.00.00.0c.00.00.00.00.00.19.00.10.80.00.08.06.12.34.56.78.9a.bc.00.00.00.19.00.10.80.00.42.06.12.34.56.78.9a.bc.00.00.ff.ff.00.18.00.00.23.20.00.06.00.20.00.00.00.00.00.01.1c.04.00.01.1e.04.00.19.00.10.00.01.1c.04.00.00.00.00.00.00.00.00.ff.ff.00.10.00.00.23.20.00.0e.ff.f8.40.00.00.00)
     has prereqs nd_ns
 
 # get_nd
@@ -9862,16 +9867,13 @@ for i in 1 2 3; do
     done
 done
 
-pg1_uuid=`ovn-nbctl create Port_Group name=pg1 ports="$pg1_ports"`
+ovn-nbctl create Port_Group name=pg1 ports="$pg1_ports"
 ovn-nbctl create Port_Group name=pg2 ports="$pg2_ports"
 
 # create ACLs on pg1 to drop traffic from pg2 to pg1
-ovn-nbctl --id=@acl1 create acl priority=1001 direction=to-lport \
-        match='"outport == @pg1"' action=drop \
-        -- add port_group $pg1_uuid acls @acl1
-ovn-nbctl --id=@acl2 create acl priority=1002 direction=to-lport \
-        match='"outport == @pg1 && ip4.src == $pg2_ip4"' action=allow-related \
-        -- add port_group $pg1_uuid acls @acl2
+ovn-nbctl acl-add pg1 to-lport 1001 'outport == @pg1' drop
+ovn-nbctl --type=port-group acl-add pg1 to-lport 1002 \
+        'outport == @pg1 && ip4.src == $pg2_ip4' allow-related
 
 # Physical network:
 #
