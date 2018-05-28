@@ -1189,6 +1189,7 @@ static const struct net_device_ops gre_tap_netdev_ops = {
 	.ndo_set_mac_address	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 #ifdef	HAVE_RHEL7_MAX_MTU
+	.ndo_size		= sizeof(struct net_device_ops),
 	.extended.ndo_change_mtu = ip_tunnel_change_mtu,
 #else
 	.ndo_change_mtu		= ip_tunnel_change_mtu,
@@ -1567,10 +1568,6 @@ static struct vport *erspan_create(const struct vport_parms *parms)
 	return ovs_netdev_link(vport, parms->name);
 }
 
-#ifndef OVS_VPORT_TYPE_ERSPAN
-/* Until integration is done... */
-#define OVS_VPORT_TYPE_ERSPAN  107  /* ERSPAN tunnel. */
-#endif
 static struct vport_ops ovs_erspan_vport_ops = {
 	.type		= OVS_VPORT_TYPE_ERSPAN,
 	.create		= erspan_create,
