@@ -28,12 +28,17 @@ struct hmap;
 struct lport_index;
 struct ovsrec_bridge;
 struct sbrec_chassis;
+struct sbrec_dns_table;
+struct sbrec_mac_binding_table;
 
 void pinctrl_init(void);
 void pinctrl_run(struct controller_ctx *,
+                 const struct sbrec_dns_table *,
+                 const struct sbrec_mac_binding_table *,
                  const struct ovsrec_bridge *, const struct sbrec_chassis *,
-                 const struct chassis_index *, struct hmap *local_datapaths,
-                 struct sset *active_tunnels);
+                 const struct chassis_index *,
+                 const struct hmap *local_datapaths,
+                 const struct sset *active_tunnels);
 void pinctrl_wait(struct controller_ctx *);
 void pinctrl_destroy(void);
 

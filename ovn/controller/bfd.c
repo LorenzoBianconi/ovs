@@ -102,11 +102,11 @@ bfd_calculate_active_tunnels(const struct ovsrec_bridge *br_int,
 
 struct local_datapath_node {
     struct ovs_list node;
-    struct local_datapath *dp;
+    const struct local_datapath *dp;
 };
 
 static void
-bfd_travel_gw_related_chassis(struct local_datapath *dp,
+bfd_travel_gw_related_chassis(const struct local_datapath *dp,
                               const struct hmap *local_datapaths,
                               struct ovsdb_idl_index_cursor *cursor,
                               struct sbrec_port_binding *lpval,
@@ -185,7 +185,7 @@ bfd_travel_gw_related_chassis(struct local_datapath *dp,
 static void
 bfd_calculate_chassis(struct controller_ctx *ctx,
                       const struct sbrec_chassis *our_chassis,
-                      struct hmap *local_datapaths,
+                      const struct hmap *local_datapaths,
                       const struct chassis_index *chassis_index,
                       struct sset *bfd_chassis)
 {
@@ -199,7 +199,7 @@ bfd_calculate_chassis(struct controller_ctx *ctx,
     const struct sbrec_port_binding *pb;
     struct ovsdb_idl_index_cursor cursor;
     struct sbrec_port_binding *lpval;
-    struct local_datapath *dp;
+    const struct local_datapath *dp;
 
     ovsdb_idl_initialize_cursor(ctx->ovnsb_idl,
                                 &sbrec_table_port_binding,
@@ -246,8 +246,11 @@ bfd_calculate_chassis(struct controller_ctx *ctx,
 }
 
 void
-bfd_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
-        const struct sbrec_chassis *chassis_rec, struct hmap *local_datapaths,
+bfd_run(struct controller_ctx *ctx,
+        const struct ovsrec_interface_table *interface_table,
+        const struct ovsrec_bridge *br_int,
+        const struct sbrec_chassis *chassis_rec,
+        const struct hmap *local_datapaths,
         const struct chassis_index *chassis_index)
 {
 
@@ -274,7 +277,7 @@ bfd_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
 
     /* Enable or disable bfd */
     const struct ovsrec_interface *iface;
-    OVSREC_INTERFACE_FOR_EACH (iface, ctx->ovs_idl) {
+    OVSREC_INTERFACE_TABLE_FOR_EACH (iface, interface_table) {
         if (sset_contains(&tunnels, iface->name)) {
                 interface_set_bfd(
                         iface, sset_contains(&bfd_ifaces, iface->name));

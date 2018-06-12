@@ -151,11 +151,11 @@ put_stack(enum mf_field_id field, struct ofpact_stack *stack)
     stack->subfield.n_bits = stack->subfield.field->n_bits;
 }
 
-static const struct sbrec_port_binding*
-get_localnet_port(struct hmap *local_datapaths, int64_t tunnel_key)
+static const struct sbrec_port_binding *
+get_localnet_port(const struct hmap *local_datapaths, int64_t tunnel_key)
 {
-    struct local_datapath *ld = get_local_datapath(local_datapaths,
-                                                   tunnel_key);
+    const struct local_datapath *ld = get_local_datapath(local_datapaths,
+                                                         tunnel_key);
     return ld ? ld->localnet_port : NULL;
 }
 
@@ -295,8 +295,8 @@ consider_port_binding(struct controller_ctx *ctx,
                       enum mf_field_id mff_ovn_geneve,
                       const struct simap *ct_zones,
                       const struct chassis_index *chassis_index,
-                      struct sset *active_tunnels,
-                      struct hmap *local_datapaths,
+                      const struct sset *active_tunnels,
+                      const struct hmap *local_datapaths,
                       const struct sbrec_port_binding *binding,
                       const struct sbrec_chassis *chassis,
                       struct ofpbuf *ofpacts_p,
@@ -730,7 +730,7 @@ out:
 static void
 consider_mc_group(enum mf_field_id mff_ovn_geneve,
                   const struct simap *ct_zones,
-                  struct hmap *local_datapaths,
+                  const struct hmap *local_datapaths,
                   const struct sbrec_chassis *chassis,
                   const struct sbrec_multicast_group *mc,
                   struct ofpbuf *ofpacts_p,
@@ -867,14 +867,18 @@ update_ofports(struct simap *old, struct simap *new)
 }
 
 void
-physical_run(struct controller_ctx *ctx, enum mf_field_id mff_ovn_geneve,
+physical_run(struct controller_ctx *ctx,
+             const struct sbrec_multicast_group_table *multicast_group_table,
+             const struct sbrec_port_binding_table *port_binding_table,
+             enum mf_field_id mff_ovn_geneve,
              const struct ovsrec_bridge *br_int,
              const struct sbrec_chassis *chassis,
              const struct simap *ct_zones,
-             struct hmap *flow_table, struct hmap *local_datapaths,
+             const struct hmap *local_datapaths,
              const struct sset *local_lports,
-             struct chassis_index *chassis_index,
-             struct sset *active_tunnels)
+             const struct chassis_index *chassis_index,
+             const struct sset *active_tunnels,
+             struct hmap *flow_table)
 {
 
     /* This bool tracks physical mapping changes. */
@@ -994,7 +998,7 @@ physical_run(struct controller_ctx *ctx, enum mf_field_id mff_ovn_geneve,
     /* Set up flows in table 0 for physical-to-logical translation and in table
      * 64 for logical-to-physical translation. */
     const struct sbrec_port_binding *binding;
-    SBREC_PORT_BINDING_FOR_EACH (binding, ctx->ovnsb_idl) {
+    SBREC_PORT_BINDING_TABLE_FOR_EACH (binding, port_binding_table) {
         consider_port_binding(ctx, mff_ovn_geneve, ct_zones,
                               chassis_index, active_tunnels,
                               local_datapaths, binding, chassis,
@@ -1005,7 +1009,7 @@ physical_run(struct controller_ctx *ctx, enum mf_field_id mff_ovn_geneve,
     const struct sbrec_multicast_group *mc;
     struct ofpbuf remote_ofpacts;
     ofpbuf_init(&remote_ofpacts, 0);
-    SBREC_MULTICAST_GROUP_FOR_EACH (mc, ctx->ovnsb_idl) {
+    SBREC_MULTICAST_GROUP_TABLE_FOR_EACH (mc, multicast_group_table) {
         consider_mc_group(mff_ovn_geneve, ct_zones, local_datapaths, chassis,
                           mc, &ofpacts, &remote_ofpacts, flow_table);
     }
@@ -1061,7 +1065,7 @@ physical_run(struct controller_ctx *ctx, enum mf_field_id mff_ovn_geneve,
             continue;
         }
 
-        SBREC_PORT_BINDING_FOR_EACH (binding, ctx->ovnsb_idl) {
+        SBREC_PORT_BINDING_TABLE_FOR_EACH (binding, port_binding_table) {
             struct match match = MATCH_CATCHALL_INITIALIZER;
 
             if (!binding->chassis ||
