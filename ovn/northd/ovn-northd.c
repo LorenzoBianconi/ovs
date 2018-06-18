@@ -5329,9 +5329,15 @@ build_lrouter_flows(struct hmap *datapaths, struct hmap *ports,
             ds_clear(&match);
             ds_clear(&actions);
 
+            if (in6_is_lla(&op->lrp_networks.ipv6_addrs[i].network))
+                continue;
+
             ds_put_format(&match,
                           "inport == %s && ip6 && "
-                          "ip.ttl == {0, 1} && !ip.later_frag", op->json_key);
+                          "ip6.src == %s/64 && "
+                          "ip.ttl == {0, 1} && !ip.later_frag",
+                          op->lrp_networks.ipv6_addrs[i].network,
+                          op->json_key);
             ds_put_format(&actions,
                           "icmp6 {"
                           "eth.dst <-> eth.src; "
