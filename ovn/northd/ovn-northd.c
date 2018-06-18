@@ -5311,7 +5311,7 @@ build_lrouter_flows(struct hmap *datapaths, struct hmap *ports,
                           ds_cstr(&match), ds_cstr(&actions));
         }
 
-        /* TCP port unreachable */
+        /* TCP port unreachable and ICMPv6 time exceeded */
         for (int i = 0; i < op->lrp_networks.n_ipv6_addrs; i++) {
             const char *action;
 
@@ -5325,6 +5325,25 @@ build_lrouter_flows(struct hmap *datapaths, struct hmap *ports,
                         "next; };";
             ovn_lflow_add(lflows, op->od, S_ROUTER_IN_IP_INPUT, 80,
                           ds_cstr(&match), action);
+
+            ds_clear(&match);
+            ds_clear(&actions);
+
+            ds_put_format(&match,
+                          "inport == %s && ip6 && "
+                          "ip.ttl == {0, 1} && !ip.later_frag", op->json_key);
+            ds_put_format(&actions,
+                          "icmp6 {"
+                          "eth.dst <-> eth.src; "
+                          "ip6.dst = ip6.src; "
+                          "ip6.src = %s; "
+                          "ip.ttl = 255; "
+                          "icmp6.type = 3; /* Time exceeded */ "
+                          "icmp6.code = 0; /* TTL exceeded in transit */ "
+                          "next; };",
+                          op->lrp_networks.ipv6_addrs[i].addr_s);
+            ovn_lflow_add(lflows, op->od, S_ROUTER_IN_IP_INPUT, 40,
+                          ds_cstr(&match), ds_cstr(&actions));
         }
     }
 
