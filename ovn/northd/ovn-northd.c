@@ -39,6 +39,7 @@
 #include "openvswitch/poll-loop.h"
 #include "smap.h"
 #include "sset.h"
+#include "svec.h"
 #include "stream.h"
 #include "stream-ssl.h"
 #include "unixctl.h"
@@ -6476,6 +6477,24 @@ sync_address_set(struct northd_context *ctx, const char *name,
                                     addrs, n_addrs);
 }
 
+/* Go through 'addresses' and add found IPv4 addresses to 'ipv4_addrs' and IPv6
+ * addresses to 'ipv6_addrs'.
+ */
+static void
+split_addresses(const char *addresses, struct svec *ipv4_addrs,
+                struct svec *ipv6_addrs)
+{
+    struct lport_addresses laddrs;
+    extract_lsp_addresses(addresses, &laddrs);
+    for (size_t k = 0; k < laddrs.n_ipv4_addrs; k++) {
+        svec_add(ipv4_addrs, laddrs.ipv4_addrs[k].addr_s);
+    }
+    for (size_t k = 0; k < laddrs.n_ipv6_addrs; k++) {
+        svec_add(ipv6_addrs, laddrs.ipv6_addrs[k].addr_s);
+    }
+    destroy_lport_addresses(&laddrs);
+}
+
 /* OVN_Southbound Address_Set table contains same records as in north
  * bound, plus the records generated from Port_Group table in north bound.
  *
@@ -6499,54 +6518,34 @@ sync_address_sets(struct northd_context *ctx)
     /* sync port group generated address sets first */
     const struct nbrec_port_group *nb_port_group;
     NBREC_PORT_GROUP_FOR_EACH (nb_port_group, ctx->ovnnb_idl) {
-        char **ipv4_addrs = xcalloc(1, sizeof *ipv4_addrs);
-        size_t n_ipv4_addrs = 0;
-        size_t n_ipv4_addrs_buf = 1;
-        char **ipv6_addrs = xcalloc(1, sizeof *ipv6_addrs);
-        size_t n_ipv6_addrs = 0;
-        size_t n_ipv6_addrs_buf = 1;
+        struct svec ipv4_addrs = SVEC_EMPTY_INITIALIZER;
+        struct svec ipv6_addrs = SVEC_EMPTY_INITIALIZER;
         for (size_t i = 0; i < nb_port_group->n_ports; i++) {
             for (size_t j = 0; j < nb_port_group->ports[i]->n_addresses; j++) {
-                struct lport_addresses laddrs;
-                extract_lsp_addresses(nb_port_group->ports[i]->addresses[j],
-                                     &laddrs);
-                while (n_ipv4_addrs_buf < n_ipv4_addrs + laddrs.n_ipv4_addrs) {
-                    n_ipv4_addrs_buf *= 2;
-                    ipv4_addrs = xrealloc(ipv4_addrs,
-                            n_ipv4_addrs_buf * sizeof *ipv4_addrs);
+                const char *addrs = nb_port_group->ports[i]->addresses[j];
+                if (!is_dynamic_lsp_address(addrs)) {
+                    split_addresses(addrs, &ipv4_addrs, &ipv6_addrs);
                 }
-                for (size_t k = 0; k < laddrs.n_ipv4_addrs; k++) {
-                    ipv4_addrs[n_ipv4_addrs++] =
-                        xstrdup(laddrs.ipv4_addrs[k].addr_s);
-                }
-                while (n_ipv6_addrs_buf < n_ipv6_addrs + laddrs.n_ipv6_addrs) {
-                    n_ipv6_addrs_buf *= 2;
-                    ipv6_addrs = xrealloc(ipv6_addrs,
-                            n_ipv6_addrs_buf * sizeof *ipv6_addrs);
-                }
-                for (size_t k = 0; k < laddrs.n_ipv6_addrs; k++) {
-                    ipv6_addrs[n_ipv6_addrs++] =
-                        xstrdup(laddrs.ipv6_addrs[k].addr_s);
-                }
-                destroy_lport_addresses(&laddrs);
+            }
+            if (nb_port_group->ports[i]->dynamic_addresses) {
+                split_addresses(nb_port_group->ports[i]->dynamic_addresses,
+                                &ipv4_addrs, &ipv6_addrs);
             }
         }
         char *ipv4_addrs_name = xasprintf("%s_ip4", nb_port_group->name);
         char *ipv6_addrs_name = xasprintf("%s_ip6", nb_port_group->name);
-        sync_address_set(ctx, ipv4_addrs_name, (const char **)ipv4_addrs,
-                         n_ipv4_addrs, &sb_address_sets);
-        sync_address_set(ctx, ipv6_addrs_name, (const char **)ipv6_addrs,
-                         n_ipv6_addrs, &sb_address_sets);
+        sync_address_set(ctx, ipv4_addrs_name,
+                         /* "char **" is not compatible with "const char **" */
+                         (const char **)ipv4_addrs.names,
+                         ipv4_addrs.n, &sb_address_sets);
+        sync_address_set(ctx, ipv6_addrs_name,
+                         /* "char **" is not compatible with "const char **" */
+                         (const char **)ipv6_addrs.names,
+                         ipv6_addrs.n, &sb_address_sets);
         free(ipv4_addrs_name);
         free(ipv6_addrs_name);
-        for (size_t i = 0; i < n_ipv4_addrs; i++) {
-            free(ipv4_addrs[i]);
-        }
-        free(ipv4_addrs);
-        for (size_t i = 0; i < n_ipv6_addrs; i++) {
-            free(ipv6_addrs[i]);
-        }
-        free(ipv6_addrs);
+        svec_destroy(&ipv4_addrs);
+        svec_destroy(&ipv6_addrs);
     }
 
     /* sync user defined address sets, which may overwrite port group
