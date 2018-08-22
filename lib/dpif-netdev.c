@@ -5160,11 +5160,11 @@ dp_netdev_run_meter(struct dp_netdev *dp, struct dp_packet_batch *packets_,
 
 /* Meter set/get/del processing is still single-threaded. */
 static int
-dpif_netdev_meter_set(struct dpif *dpif, ofproto_meter_id *meter_id,
+dpif_netdev_meter_set(struct dpif *dpif, ofproto_meter_id meter_id,
                       struct ofputil_meter_config *config)
 {
     struct dp_netdev *dp = get_dp_netdev(dpif);
-    uint32_t mid = meter_id->uint32;
+    uint32_t mid = meter_id.uint32;
     struct dp_meter *meter;
     int i;
 
@@ -5801,9 +5801,9 @@ smc_lookup_batch(struct dp_netdev_pmd_thread *pmd,
                 if (OVS_LIKELY(dpcls_rule_matches_key(&flow->cr, &keys[i]) &&
                 flow->flow.in_port.odp_port == packet->md.in_port.odp_port)) {
                     /* SMC hit and emc miss, we insert into EMC */
-                    emc_probabilistic_insert(pmd, &keys[i], flow);
                     keys[i].len =
                         netdev_flow_key_size(miniflow_n_values(&keys[i].mf));
+                    emc_probabilistic_insert(pmd, &keys[i], flow);
                     dp_netdev_queue_batches(packet, flow,
                     miniflow_get_tcp_flags(&keys[i].mf), batches, n_batches);
                     n_smc_hit++;
@@ -6825,6 +6825,9 @@ const struct dpif_class dpif_netdev_class = {
     dpif_netdev_ct_set_maxconns,
     dpif_netdev_ct_get_maxconns,
     dpif_netdev_ct_get_nconns,
+    NULL,                       /* ct_set_limits */
+    NULL,                       /* ct_get_limits */
+    NULL,                       /* ct_del_limits */
     dpif_netdev_meter_get_features,
     dpif_netdev_meter_set,
     dpif_netdev_meter_get,

@@ -24,6 +24,7 @@ COMMON_MACROS_AT = \
 TESTSUITE_AT = \
 	tests/testsuite.at \
 	tests/completion.at \
+	tests/checkpatch.at \
 	tests/library.at \
 	tests/heap.at \
 	tests/bundle.at \
@@ -421,6 +422,7 @@ CHECK_PYFILES = \
 	tests/test-l7.py \
 	tests/test-ovsdb.py \
 	tests/test-reconnect.py \
+	tests/test-stream.py \
 	tests/MockXenAPI.py \
 	tests/test-unix-socket.py \
 	tests/test-unixctl.py \

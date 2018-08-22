@@ -66,6 +66,7 @@ Aryan TaheriMonfared               aryan.taherimonfared@uis.no
 Ashish Varma                       ashishvarma.ovs@gmail.com
 Ashwin Swaminathan                 ashwinds@arista.com
 Babu Shanmugam                     bschanmu@redhat.com
+Bala Sankaran                      bsankara@redhat.com
 Ben Pfaff                          blp@ovn.org
 Ben Warren                         ben@skyportsystems.com
 Benli Ye                           daniely@vmware.com
@@ -364,6 +365,7 @@ Yin Lin                            linyi@vmware.com
 Yu Zhiguo                          yuzg@cn.fujitsu.com
 Yuanhan Liu                        yuanhan.liu@linux.intel.com
 Yunjian Wang                       wangyunjian@huawei.com
+Zak Whittington                    zwhitt.vmware@gmail.com
 ZhengLingyun                       konghuarukhr@163.com
 Zoltán Balogh                      zoltan.balogh.eth@gmail.com
 Zoltan Kiss                        zoltan.kiss@citrix.com
@@ -539,6 +541,7 @@ Murali R                        muralirdev@gmail.com
 Nagi Reddy Jonnala              njonnala@Brocade.com
 Niels van Adrichem              N.L.M.vanAdrichem@tudelft.nl
 Niklas Andersson                nandersson@nicira.com
+Oscar Wilde                     xdxiaobin@gmail.com
 Pankaj Thakkar                  thakkar@nicira.com
 Pasi Kärkkäinen                 pasik@iki.fi
 Patrik Andersson R              patrik.r.andersson@ericsson.com
