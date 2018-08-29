@@ -61,6 +61,9 @@ static struct rconn *swconn;
  * rconn_get_connection_seqno(rconn), 'swconn' has reconnected. */
 static unsigned int conn_seq_no;
 
+static void init_queued_pkt_map(void);
+static void destroy_queued_pkt_map(void);
+
 static void pinctrl_handle_put_mac_binding(const struct flow *md,
                                            const struct flow *headers,
                                            bool is_arp);
@@ -108,6 +111,7 @@ static void send_ipv6_ras(
 ;
 
 COVERAGE_DEFINE(pinctrl_drop_put_mac_binding);
+COVERAGE_DEFINE(pinctrl_drop_queued_pkt_map);
 
 void
 pinctrl_init(void)
@@ -117,6 +121,7 @@ pinctrl_init(void)
     init_put_mac_bindings();
     init_send_garps();
     init_ipv6_ras();
+    init_queued_pkt_map();
 }
 
 static ovs_be32
@@ -190,10 +195,137 @@ set_actions_and_enqueue_msg(const struct dp_packet *packet,
     ofpbuf_uninit(&ofpacts);
 }
 
+struct pkt_info {
+    struct match flow_metadata;
+    unsigned char *user_data;
+    unsigned user_size;
+    struct dp_packet *p;
+};
+
+#define QUEUE_DEPTH     64
+struct queued_pkt {
+    struct hmap_node hmap_node;
+
+    /* key */
+    char ip[INET6_ADDRSTRLEN];
+
+    long long int timestamp;
+    struct pkt_info data[QUEUE_DEPTH];
+    int head, tail;
+};
+
+/* XXX we need a mutex here */
+static struct hmap queued_pkt_map;
+
 static void
-pinctrl_handle_arp(const struct flow *ip_flow, const struct match *md,
-                   struct ofpbuf *userdata)
+init_queued_pkt_map(void)
 {
+    hmap_init(&queued_pkt_map);
+}
+
+static void
+destroy_queued_pkt(struct queued_pkt *qp)
+{
+    struct pkt_info *pi;
+
+    while (qp->head != qp->tail) {
+        pi = &qp->data[qp->head];
+        dp_packet_uninit(pi->p);
+        free(pi->user_data);
+
+        qp->head = (qp->head + 1) % QUEUE_DEPTH;
+    }
+    hmap_remove(&queued_pkt_map, &qp->hmap_node);
+    free(qp);
+}
+
+static void
+destroy_queued_pkt_map(void)
+{
+    struct queued_pkt *qp;
+    HMAP_FOR_EACH_POP (qp, hmap_node, &queued_pkt_map) {
+        destroy_queued_pkt(qp);
+    }
+    hmap_destroy(&queued_pkt_map);
+}
+
+static void
+queued_push_pkt(struct queued_pkt *qp, struct dp_packet *packet,
+                const struct ofputil_packet_in *pin)
+{
+    struct pkt_info *pi = &qp->data[qp->tail];
+    int next = (qp->tail + 1) % QUEUE_DEPTH;
+
+    pi->flow_metadata = pin->flow_metadata;
+    pi->user_data = xmalloc(pin->userdata_len);
+    pi->user_size = pin->userdata_len;
+    memcpy(pi->user_data, pin->userdata, pin->userdata_len);
+    pi->p = packet;
+
+    if (next == qp->head) {
+        pi = &qp->data[qp->head];
+        dp_packet_uninit(pi->p);
+        free(pi->user_data);
+        qp->head = (qp->head + 1) % QUEUE_DEPTH;
+    }
+    qp->tail = next;
+}
+
+static void
+queued_send_pkt(struct queued_pkt *qp, unsigned char *addr)
+{
+    while (qp->head != qp->tail) {
+        struct pkt_info *pi = &qp->data[qp->head];
+        memcpy(dp_packet_data(pi->p), addr, 6);
+
+        struct ofpbuf userdata = ofpbuf_const_initializer(pi->user_data,
+                                                          pi->user_size);
+
+        set_actions_and_enqueue_msg(pi->p, &pi->flow_metadata, &userdata);
+        dp_packet_uninit(pi->p);
+
+        qp->head = (qp->head + 1) % QUEUE_DEPTH;
+    }
+}
+
+#define QUEUE_MAP_TIMEOUT   30000
+static void
+queued_pkt_map_gc(void)
+{
+    struct queued_pkt *cur_qp, *next_qp;
+    long long int now = time_msec();
+
+    HMAP_FOR_EACH_SAFE (cur_qp, next_qp, hmap_node, &queued_pkt_map) {
+        if (now > cur_qp->timestamp + QUEUE_MAP_TIMEOUT) {
+            VLOG_WARN("%s: destroyed entry for %s\n", __func__, cur_qp->ip);
+            destroy_queued_pkt(cur_qp);
+        }
+    }
+}
+
+static struct queued_pkt *
+pinctrl_find_queued_pkt(const char *ip, uint32_t hash)
+{
+    struct queued_pkt *qp;
+
+    HMAP_FOR_EACH_WITH_HASH (qp, hmap_node, hash,
+                             &queued_pkt_map) {
+        if (!strcmp(qp->ip, ip)) {
+            return qp;
+        }
+    }
+    return NULL;
+}
+
+static void
+pinctrl_handle_arp(const struct flow *ip_flow, const struct ofputil_packet_in *pin,
+                   struct dp_packet *pkt_in, struct ofpbuf *userdata)
+{
+    const struct match *md = &pin->flow_metadata;
+    uint64_t packet_stub[128 / 8];
+    char ip[INET6_ADDRSTRLEN];
+    struct dp_packet packet;
+
     /* This action only works for IP packets, and the switch should only send
      * us IP packets this way, but check here just to be sure. */
     if (ip_flow->dl_type != htons(ETH_TYPE_IP)) {
@@ -203,9 +335,28 @@ pinctrl_handle_arp(const struct flow *ip_flow, const struct match *md,
         return;
     }
 
+    inet_ntop(AF_INET, &ip_flow->nw_dst, ip, sizeof(ip));
+    uint32_t hash = hash_string(ip, 0);
+    struct queued_pkt *qp = pinctrl_find_queued_pkt(ip, hash);
+    if (!qp) {
+        if (hmap_count(&queued_pkt_map) >= 1000) {
+            COVERAGE_INC(pinctrl_drop_queued_pkt_map);
+            goto send_arp;
+        }
+
+        qp = xmalloc(sizeof *qp);
+        hmap_insert(&queued_pkt_map, &qp->hmap_node, hash);
+        ovs_strlcpy_arrays(qp->ip, ip);
+        qp->head = qp->tail = 0;
+
+        VLOG_WARN("%s: created entry for %s\n", __func__, ip);
+    }
+    qp->timestamp = time_msec();
+    /* clone the packet to send it later with correct L2 address */
+    queued_push_pkt(qp, dp_packet_clone(pkt_in), pin);
+
+send_arp:
     /* Compose an ARP packet. */
-    uint64_t packet_stub[128 / 8];
-    struct dp_packet packet;
     dp_packet_use_stub(&packet, packet_stub, sizeof packet_stub);
     compose_arp__(&packet);
 
@@ -1152,7 +1303,7 @@ process_packet_in(const struct ofp_header *msg,
 
     switch (ntohl(ah->opcode)) {
     case ACTION_OPCODE_ARP:
-        pinctrl_handle_arp(&headers, &pin.flow_metadata, &userdata);
+        pinctrl_handle_arp(&headers, &pin, &packet, &userdata);
         break;
 
     case ACTION_OPCODE_PUT_ARP:
@@ -1300,6 +1451,7 @@ pinctrl_run(struct ovsdb_idl_txn *ovnsb_idl_txn,
                   local_datapaths, active_tunnels);
     send_ipv6_ras(sbrec_port_binding_by_datapath,
                   sbrec_port_binding_by_name, local_datapaths);
+    queued_pkt_map_gc();
 }
 
 /* Table of ipv6_ra_state structures, keyed on logical port name */
@@ -1610,6 +1762,7 @@ pinctrl_destroy(void)
     destroy_put_mac_bindings();
     destroy_send_garps();
     destroy_ipv6_ras();
+    destroy_queued_pkt_map();
 }
 
 /* Implementation of the "put_arp" and "put_nd" OVN actions.  These
@@ -1676,6 +1829,7 @@ pinctrl_handle_put_mac_binding(const struct flow *md,
     uint32_t dp_key = ntohll(md->metadata);
     uint32_t port_key = md->regs[MFF_LOG_INPORT - MFF_REG0];
     char ip_s[INET6_ADDRSTRLEN];
+    struct queued_pkt *qp;
 
     if (is_arp) {
         ovs_be32 ip = htonl(md->regs[0]);
@@ -1701,6 +1855,14 @@ pinctrl_handle_put_mac_binding(const struct flow *md,
     }
     pmb->timestamp = time_msec();
     pmb->mac = headers->dl_src;
+
+    /* send queued pkts */
+    qp = pinctrl_find_queued_pkt(ip_s, hash_string(ip_s, 0));
+    if (qp) {
+        queued_send_pkt(qp, pmb->mac.ea);
+
+        VLOG_WARN("%s: updated entry for %s\n", __func__, ip_s);
+    }
 }
 
 static const struct sbrec_mac_binding *
