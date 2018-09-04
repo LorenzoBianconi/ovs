@@ -195,13 +195,6 @@ set_actions_and_enqueue_msg(const struct dp_packet *packet,
     ofpbuf_uninit(&ofpacts);
 }
 
-struct pkt_info {
-    struct match flow_metadata;
-    unsigned char *user_data;
-    unsigned user_size;
-    struct dp_packet *p;
-};
-
 #define QUEUE_DEPTH     64
 struct queued_pkt {
     struct hmap_node hmap_node;
@@ -209,8 +202,8 @@ struct queued_pkt {
     /* key */
     char ip[INET6_ADDRSTRLEN];
 
+    struct dp_packet p[QUEUE_DEPTH];
     long long int timestamp;
-    struct pkt_info data[QUEUE_DEPTH];
     int head, tail;
 };
 
@@ -226,13 +219,8 @@ init_queued_pkt_map(void)
 static void
 destroy_queued_pkt(struct queued_pkt *qp)
 {
-    struct pkt_info *pi;
-
     while (qp->head != qp->tail) {
-        pi = &qp->data[qp->head];
-        dp_packet_uninit(pi->p);
-        free(pi->user_data);
-
+        dp_packet_uninit(&qp->p[qp->head]);
         qp->head = (qp->head + 1) % QUEUE_DEPTH;
     }
     hmap_remove(&queued_pkt_map, &qp->hmap_node);
@@ -250,39 +238,52 @@ destroy_queued_pkt_map(void)
 }
 
 static void
-queued_push_pkt(struct queued_pkt *qp, struct dp_packet *packet,
-                const struct ofputil_packet_in *pin)
+queued_push_pkt(struct queued_pkt *qp, struct dp_packet *packet)
 {
-    struct pkt_info *pi = &qp->data[qp->tail];
+    struct dp_packet *p = &qp->p[qp->tail];
     int next = (qp->tail + 1) % QUEUE_DEPTH;
+    int size = dp_packet_size(packet);
+    unsigned char *stub = xmalloc(size);
 
-    pi->flow_metadata = pin->flow_metadata;
-    pi->user_data = xmalloc(pin->userdata_len);
-    pi->user_size = pin->userdata_len;
-    memcpy(pi->user_data, pin->userdata, pin->userdata_len);
-    pi->p = packet;
+    dp_packet_use_stub(p, stub, size);
+    dp_packet_clear(p);
+    p->packet_type = htonl(PT_ETH);
+    memcpy(dp_packet_data(p), dp_packet_data(packet), size);
 
     if (next == qp->head) {
-        pi = &qp->data[qp->head];
-        dp_packet_uninit(pi->p);
-        free(pi->user_data);
+        dp_packet_uninit(&qp->p[qp->head]);
         qp->head = (qp->head + 1) % QUEUE_DEPTH;
     }
     qp->tail = next;
 }
 
 static void
-queued_send_pkt(struct queued_pkt *qp, unsigned char *addr)
+queued_send_pkt(struct queued_pkt *qp, struct eth_addr *addr)
 {
+    int version = rconn_get_version(swconn);
+
     while (qp->head != qp->tail) {
-        struct pkt_info *pi = &qp->data[qp->head];
-        memcpy(dp_packet_data(pi->p), addr, 6);
+        struct dp_packet *p = &qp->p[qp->head];
+        memcpy(dp_packet_data(p), addr->ea, 6);
 
-        struct ofpbuf userdata = ofpbuf_const_initializer(pi->user_data,
-                                                          pi->user_size);
+        uint64_t ofpacts_stub[1024 / 8];
+        struct ofpbuf ofpacts = OFPBUF_STUB_INITIALIZER(ofpacts_stub);
+        struct ofpact_resubmit *resubmit = ofpact_put_RESUBMIT(&ofpacts);
+        resubmit->in_port = OFPP_CONTROLLER;
+        resubmit->table_id = OFTABLE_LOG_INGRESS_PIPELINE;
 
-        set_actions_and_enqueue_msg(pi->p, &pi->flow_metadata, &userdata);
-        dp_packet_uninit(pi->p);
+        struct ofputil_packet_out po = {
+            .packet = dp_packet_data(p),
+            .packet_len = dp_packet_size(p),
+            .buffer_id = UINT32_MAX,
+            .ofpacts = ofpacts.data,
+            .ofpacts_len = ofpacts.size,
+        };
+        match_set_in_port(&po.flow_metadata, OFPP_CONTROLLER);
+        enum ofputil_protocol proto = ofputil_protocol_from_ofp_version(version);
+        queue_msg(ofputil_encode_packet_out(&po, proto));
+        dp_packet_uninit(p);
+        ofpbuf_uninit(&ofpacts);
 
         qp->head = (qp->head + 1) % QUEUE_DEPTH;
     }
@@ -353,7 +354,7 @@ pinctrl_handle_arp(const struct flow *ip_flow, const struct ofputil_packet_in *p
     }
     qp->timestamp = time_msec();
     /* clone the packet to send it later with correct L2 address */
-    queued_push_pkt(qp, dp_packet_clone(pkt_in), pin);
+    queued_push_pkt(qp, pkt_in);
 
 send_arp:
     /* Compose an ARP packet. */
@@ -1859,7 +1860,7 @@ pinctrl_handle_put_mac_binding(const struct flow *md,
     /* send queued pkts */
     qp = pinctrl_find_queued_pkt(ip_s, hash_string(ip_s, 0));
     if (qp) {
-        queued_send_pkt(qp, pmb->mac.ea);
+        queued_send_pkt(qp, &pmb->mac);
 
         VLOG_WARN("%s: updated entry for %s\n", __func__, ip_s);
     }
