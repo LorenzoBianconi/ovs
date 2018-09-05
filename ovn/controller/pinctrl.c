@@ -61,6 +61,9 @@ static struct rconn *swconn;
  * rconn_get_connection_seqno(rconn), 'swconn' has reconnected. */
 static unsigned int conn_seq_no;
 
+static void init_buffered_packets_map(void);
+static void destroy_buffered_packets_map(void);
+
 static void pinctrl_handle_put_mac_binding(const struct flow *md,
                                            const struct flow *headers,
                                            bool is_arp);
@@ -96,6 +99,7 @@ static void pinctrl_handle_put_nd_ra_opts(
     struct ofputil_packet_in *pin, struct ofpbuf *userdata,
     struct ofpbuf *continuation);
 static void pinctrl_handle_nd_ns(const struct flow *ip_flow,
+                                 struct dp_packet *pkt_in,
                                  const struct match *md,
                                  struct ofpbuf *userdata);
 static void init_ipv6_ras(void);
@@ -108,6 +112,7 @@ static void send_ipv6_ras(
 ;
 
 COVERAGE_DEFINE(pinctrl_drop_put_mac_binding);
+COVERAGE_DEFINE(pinctrl_drop_buffered_packets_map);
 
 void
 pinctrl_init(void)
@@ -117,6 +122,7 @@ pinctrl_init(void)
     init_put_mac_bindings();
     init_send_garps();
     init_ipv6_ras();
+    init_buffered_packets_map();
 }
 
 static ovs_be32
@@ -190,9 +196,181 @@ set_actions_and_enqueue_msg(const struct dp_packet *packet,
     ofpbuf_uninit(&ofpacts);
 }
 
+struct buffer_info {
+    struct ofpbuf ofpacts;
+    struct dp_packet *p;
+};
+
+#define BUFFER_QUEUE_DEPTH     4
+struct buffered_packets {
+    struct hmap_node hmap_node;
+
+    /* key */
+    ovs_be128 ip;
+
+    long long int timestamp;
+
+    struct buffer_info data[BUFFER_QUEUE_DEPTH];
+    uint32_t head, tail;
+};
+
+static struct hmap buffered_packets_map;
+
 static void
-pinctrl_handle_arp(const struct flow *ip_flow, const struct match *md,
-                   struct ofpbuf *userdata)
+init_buffered_packets_map(void)
+{
+    hmap_init(&buffered_packets_map);
+}
+
+static void
+destroy_buffered_packets(struct buffered_packets *bp)
+{
+    struct buffer_info *bi;
+
+    while (bp->head != bp->tail) {
+        bi = &bp->data[bp->head];
+        dp_packet_uninit(bi->p);
+        ofpbuf_uninit(&bi->ofpacts);
+
+        bp->head = (bp->head + 1) % BUFFER_QUEUE_DEPTH;
+    }
+    hmap_remove(&buffered_packets_map, &bp->hmap_node);
+    free(bp);
+}
+
+static void
+destroy_buffered_packets_map(void)
+{
+    struct buffered_packets *bp;
+    HMAP_FOR_EACH_POP (bp, hmap_node, &buffered_packets_map) {
+        destroy_buffered_packets(bp);
+    }
+    hmap_destroy(&buffered_packets_map);
+}
+
+static void
+buffered_push_packet(struct buffered_packets *bp,
+                     struct dp_packet *packet,
+                     const struct match *md)
+{
+    uint32_t next = (bp->tail + 1) % BUFFER_QUEUE_DEPTH;
+    struct buffer_info *bi = &bp->data[bp->tail];
+
+    ofpbuf_init(&bi->ofpacts, 4096);
+
+    reload_metadata(&bi->ofpacts, md);
+    struct ofpact_resubmit *resubmit = ofpact_put_RESUBMIT(&bi->ofpacts);
+    resubmit->in_port = OFPP_CONTROLLER;
+    resubmit->table_id = OFTABLE_REMOTE_OUTPUT;
+
+    bi->p = packet;
+
+    if (next == bp->head) {
+        bi = &bp->data[bp->head];
+        dp_packet_uninit(bi->p);
+        ofpbuf_uninit(&bi->ofpacts);
+        bp->head = (bp->head + 1) % BUFFER_QUEUE_DEPTH;
+    }
+    bp->tail = next;
+}
+
+static void
+buffered_send_packets(struct buffered_packets *bp, struct eth_addr *addr)
+{
+    enum ofp_version version = rconn_get_version(swconn);
+    enum ofputil_protocol proto = ofputil_protocol_from_ofp_version(version);
+
+    while (bp->head != bp->tail) {
+        struct buffer_info *bi = &bp->data[bp->head];
+        struct eth_header *eth = dp_packet_data(bi->p);
+
+        eth->eth_dst = *addr;
+        struct ofputil_packet_out po = {
+            .packet = dp_packet_data(bi->p),
+            .packet_len = dp_packet_size(bi->p),
+            .buffer_id = UINT32_MAX,
+            .ofpacts = bi->ofpacts.data,
+            .ofpacts_len = bi->ofpacts.size,
+        };
+        match_set_in_port(&po.flow_metadata, OFPP_CONTROLLER);
+        queue_msg(ofputil_encode_packet_out(&po, proto));
+
+        ofpbuf_uninit(&bi->ofpacts);
+        dp_packet_uninit(bi->p);
+
+        bp->head = (bp->head + 1) % BUFFER_QUEUE_DEPTH;
+    }
+}
+
+#define BUFFER_MAP_TIMEOUT   10000
+static void
+buffered_packets_map_gc(void)
+{
+    struct buffered_packets *cur_qp, *next_qp;
+    long long int now = time_msec();
+
+    HMAP_FOR_EACH_SAFE (cur_qp, next_qp, hmap_node, &buffered_packets_map) {
+        if (now > cur_qp->timestamp + BUFFER_MAP_TIMEOUT) {
+            destroy_buffered_packets(cur_qp);
+        }
+    }
+}
+
+static struct buffered_packets *
+pinctrl_find_buffered_packets(const ovs_be128 *ip, uint32_t hash)
+{
+    struct buffered_packets *qp;
+
+    HMAP_FOR_EACH_WITH_HASH (qp, hmap_node, hash,
+                             &buffered_packets_map) {
+        if (!memcmp(&qp->ip, ip, sizeof(ovs_be128))) {
+            return qp;
+        }
+    }
+    return NULL;
+}
+
+static int
+pinctrl_handle_bufferd_packets(const struct flow *ip_flow,
+                               struct dp_packet *pkt_in,
+                               const struct match *md, bool is_arp)
+{
+    struct buffered_packets *bp;
+    struct dp_packet *clone;
+    struct in6_addr addr;
+
+    if (is_arp) {
+        addr = in6_addr_mapped_ipv4(ip_flow->nw_dst);
+    } else {
+        addr = ip_flow->ipv6_dst;
+    }
+
+    ovs_be128 ip = get_32aligned_be128((const ovs_32aligned_be128 *)&addr);
+    uint32_t hash = hash_bytes(&ip, sizeof(ovs_be128), 0);
+    bp = pinctrl_find_buffered_packets(&ip, hash);
+    if (!bp) {
+        if (hmap_count(&buffered_packets_map) >= 1000) {
+            COVERAGE_INC(pinctrl_drop_buffered_packets_map);
+            return -ENOMEM;
+        }
+
+        bp = xmalloc(sizeof *bp);
+        hmap_insert(&buffered_packets_map, &bp->hmap_node, hash);
+        bp->head = bp->tail = 0;
+        bp->ip = ip;
+    }
+    bp->timestamp = time_msec();
+    /* clone the packet to send it later with correct L2 address */
+    clone = dp_packet_clone_data(dp_packet_data(pkt_in),
+                                 dp_packet_size(pkt_in));
+    buffered_push_packet(bp, clone, md);
+
+    return 0;
+}
+
+static void
+pinctrl_handle_arp(const struct flow *ip_flow, struct dp_packet *pkt_in,
+                   const struct match *md, struct ofpbuf *userdata)
 {
     /* This action only works for IP packets, and the switch should only send
      * us IP packets this way, but check here just to be sure. */
@@ -202,6 +380,8 @@ pinctrl_handle_arp(const struct flow *ip_flow, const struct match *md,
                      ntohs(ip_flow->dl_type));
         return;
     }
+
+    pinctrl_handle_bufferd_packets(ip_flow, pkt_in, md, true);
 
     /* Compose an ARP packet. */
     uint64_t packet_stub[128 / 8];
@@ -1152,7 +1332,7 @@ process_packet_in(const struct ofp_header *msg,
 
     switch (ntohl(ah->opcode)) {
     case ACTION_OPCODE_ARP:
-        pinctrl_handle_arp(&headers, &pin.flow_metadata, &userdata);
+        pinctrl_handle_arp(&headers, &packet, &pin.flow_metadata, &userdata);
         break;
 
     case ACTION_OPCODE_PUT_ARP:
@@ -1197,7 +1377,8 @@ process_packet_in(const struct ofp_header *msg,
         break;
 
     case ACTION_OPCODE_ND_NS:
-        pinctrl_handle_nd_ns(&headers, &pin.flow_metadata, &userdata);
+        pinctrl_handle_nd_ns(&headers, &packet, &pin.flow_metadata,
+                             &userdata);
         break;
 
     case ACTION_OPCODE_ICMP:
@@ -1300,6 +1481,7 @@ pinctrl_run(struct ovsdb_idl_txn *ovnsb_idl_txn,
                   local_datapaths, active_tunnels);
     send_ipv6_ras(sbrec_port_binding_by_datapath,
                   sbrec_port_binding_by_name, local_datapaths);
+    buffered_packets_map_gc();
 }
 
 /* Table of ipv6_ra_state structures, keyed on logical port name */
@@ -1610,6 +1792,7 @@ pinctrl_destroy(void)
     destroy_put_mac_bindings();
     destroy_send_garps();
     destroy_ipv6_ras();
+    destroy_buffered_packets_map();
 }
 
 /* Implementation of the "put_arp" and "put_nd" OVN actions.  These
@@ -1676,13 +1859,19 @@ pinctrl_handle_put_mac_binding(const struct flow *md,
     uint32_t dp_key = ntohll(md->metadata);
     uint32_t port_key = md->regs[MFF_LOG_INPORT - MFF_REG0];
     char ip_s[INET6_ADDRSTRLEN];
+    struct buffered_packets *bp;
+    ovs_be128 ip_key;
 
     if (is_arp) {
         ovs_be32 ip = htonl(md->regs[0]);
         inet_ntop(AF_INET, &ip, ip_s, sizeof(ip_s));
+
+        struct in6_addr addr = in6_addr_mapped_ipv4(ip);
+        ip_key = get_32aligned_be128((const ovs_32aligned_be128 *)&addr);
     } else {
         ovs_be128 ip6 = hton128(flow_get_xxreg(md, 0));
         inet_ntop(AF_INET6, &ip6, ip_s, sizeof(ip_s));
+        ip_key = ip6;
     }
     uint32_t hash = hash_string(ip_s, hash_2words(dp_key, port_key));
     struct put_mac_binding *pmb
@@ -1701,6 +1890,13 @@ pinctrl_handle_put_mac_binding(const struct flow *md,
     }
     pmb->timestamp = time_msec();
     pmb->mac = headers->dl_src;
+
+    /* send queued pkts */
+    uint32_t bhash = hash_bytes(&ip_key, sizeof(ovs_be128), 0);
+    bp = pinctrl_find_buffered_packets(&ip_key, bhash);
+    if (bp) {
+        buffered_send_packets(bp, &pmb->mac);
+    }
 }
 
 static const struct sbrec_mac_binding *
@@ -2399,8 +2595,8 @@ pinctrl_handle_nd_na(const struct flow *ip_flow, const struct match *md,
 }
 
 static void
-pinctrl_handle_nd_ns(const struct flow *ip_flow, const struct match *md,
-                     struct ofpbuf *userdata)
+pinctrl_handle_nd_ns(const struct flow *ip_flow, struct dp_packet *pkt_in,
+                     const struct match *md, struct ofpbuf *userdata)
 {
     /* This action only works for IPv6 packets. */
     if (get_dl_type(ip_flow) != htons(ETH_TYPE_IPV6)) {
@@ -2408,6 +2604,8 @@ pinctrl_handle_nd_ns(const struct flow *ip_flow, const struct match *md,
         VLOG_WARN_RL(&rl, "NS action on non-IPv6 packet");
         return;
     }
+
+    pinctrl_handle_bufferd_packets(ip_flow, pkt_in, md, false);
 
     uint64_t packet_stub[128 / 8];
     struct dp_packet packet;
