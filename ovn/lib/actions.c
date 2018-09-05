@@ -1170,6 +1170,12 @@ parse_ND_NS(struct action_context *ctx)
 }
 
 static void
+parse_BUFFER(struct action_context *ctx)
+{
+    parse_nested_action(ctx, OVNACT_BUFFER, "ip");
+}
+
+static void
 parse_CLONE(struct action_context *ctx)
 {
     parse_nested_action(ctx, OVNACT_CLONE, NULL);
@@ -1224,6 +1230,12 @@ static void
 format_ND_NS(const struct ovnact_nest *nest, struct ds *s)
 {
     format_nested_action(nest, "nd_ns", s);
+}
+
+static void
+format_BUFFER(const struct ovnact_nest *nest, struct ds *s)
+{
+    format_nested_action(nest, "buffer", s);
 }
 
 static void
@@ -1311,6 +1323,14 @@ encode_ND_NS(const struct ovnact_nest *on,
              struct ofpbuf *ofpacts)
 {
     encode_nested_actions(on, ep, ACTION_OPCODE_ND_NS, ofpacts);
+}
+
+static void
+encode_BUFFER(const struct ovnact_nest *on,
+              const struct ovnact_encode_params *ep,
+              struct ofpbuf *ofpacts)
+{
+    encode_nested_actions(on, ep, ACTION_OPCODE_BUFFER, ofpacts);
 }
 
 static void
@@ -2369,6 +2389,8 @@ parse_action(struct action_context *ctx)
         parse_ND_NA_ROUTER(ctx);
     } else if (lexer_match_id(ctx->lexer, "nd_ns")) {
         parse_ND_NS(ctx);
+    } else if (lexer_match_id(ctx->lexer, "buffer")) {
+        parse_BUFFER(ctx);
     } else if (lexer_match_id(ctx->lexer, "get_arp")) {
         parse_get_mac_bind(ctx, 32, ovnact_put_GET_ARP(ctx->ovnacts));
     } else if (lexer_match_id(ctx->lexer, "put_arp")) {
