@@ -251,8 +251,7 @@ destroy_buffered_packets_map(void)
 static void
 buffered_push_packet(struct buffered_packets *bp,
                      struct dp_packet *packet,
-                     const struct match *md,
-                     struct ofpbuf *userdata)
+                     const struct match *md)
 {
     enum ofp_version version = rconn_get_version(swconn);
     struct buffer_info *bi = &bp->data[bp->tail];
@@ -270,9 +269,9 @@ buffered_push_packet(struct buffered_packets *bp,
     bi->ofpacts.source = OFPBUF_STUB;
 
     reload_metadata(&bi->ofpacts, md);
-
-    ofpacts_pull_openflow_actions(userdata, userdata->size,
-                                  version, NULL, NULL, &bi->ofpacts);
+    struct ofpact_resubmit *resubmit = ofpact_put_RESUBMIT(&bi->ofpacts);
+    resubmit->in_port = OFPP_CONTROLLER;
+    resubmit->table_id = OFTABLE_REMOTE_OUTPUT;
 
     bi->p = packet;
 
@@ -342,9 +341,13 @@ pinctrl_find_buffered_packets(const char *ip, uint32_t hash)
 }
 
 static void
-pinctrl_handle_arp(const struct flow *ip_flow, const struct match *md,
-                   struct ofpbuf *userdata)
+pinctrl_handle_arp(const struct flow *ip_flow, struct dp_packet *pkt_in,
+                   const struct match *md, struct ofpbuf *userdata)
 {
+    struct dp_packet *clone, packet;
+    uint64_t packet_stub[128 / 8];
+    char ip[INET6_ADDRSTRLEN];
+
     /* This action only works for IP packets, and the switch should only send
      * us IP packets this way, but check here just to be sure. */
     if (ip_flow->dl_type != htons(ETH_TYPE_IP)) {
@@ -354,9 +357,29 @@ pinctrl_handle_arp(const struct flow *ip_flow, const struct match *md,
         return;
     }
 
+    inet_ntop(AF_INET, &ip_flow->nw_dst, ip, sizeof(ip));
+    uint32_t hash = hash_string(ip, 0);
+    struct buffered_packets *bp = pinctrl_find_buffered_packets(ip, hash);
+    if (!bp) {
+        if (hmap_count(&buffered_packets_map) >= 1000) {
+            COVERAGE_INC(pinctrl_drop_buffered_packets_map);
+            goto send_arp;
+        }
+
+        bp = xmalloc(sizeof *bp);
+        hmap_insert(&buffered_packets_map, &bp->hmap_node, hash);
+        ovs_strlcpy_arrays(bp->ip, ip);
+        bp->head = bp->tail = 0;
+        VLOG_WARN("%s: created entry for %s\n", __func__, ip);
+    }
+    bp->timestamp = time_msec();
+    /* clone the packet to send it later with correct L2 address */
+    clone = dp_packet_clone_data(dp_packet_data(pkt_in),
+                                 dp_packet_size(pkt_in));
+    buffered_push_packet(bp, clone, md);
+
+send_arp:
     /* Compose an ARP packet. */
-    uint64_t packet_stub[128 / 8];
-    struct dp_packet packet;
     dp_packet_use_stub(&packet, packet_stub, sizeof packet_stub);
     compose_arp__(&packet);
 
@@ -499,7 +522,7 @@ pinctrl_handle_buffer(const struct flow *ip_flow, struct dp_packet *pkt_in,
     /* clone the packet to send it later with correct L2 address */
     packet = dp_packet_clone_data(dp_packet_data(pkt_in),
                                   dp_packet_size(pkt_in));
-    buffered_push_packet(bp, packet, md, userdata);
+    //buffered_push_packet(bp, packet, md, userdata);
 }
 
 static void
@@ -1346,7 +1369,7 @@ process_packet_in(const struct ofp_header *msg,
 
     switch (ntohl(ah->opcode)) {
     case ACTION_OPCODE_ARP:
-        pinctrl_handle_arp(&headers, &pin.flow_metadata, &userdata);
+        pinctrl_handle_arp(&headers, &packet, &pin.flow_metadata, &userdata);
         break;
 
     case ACTION_OPCODE_PUT_ARP:
