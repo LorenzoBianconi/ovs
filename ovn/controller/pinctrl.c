@@ -206,7 +206,7 @@ struct buffered_packets {
     struct hmap_node hmap_node;
 
     /* key */
-    ovs_be128 ip;
+    struct in6_addr ip;
 
     long long int timestamp;
 
@@ -317,13 +317,13 @@ buffered_packets_map_gc(void)
 }
 
 static struct buffered_packets *
-pinctrl_find_buffered_packets(const ovs_be128 *ip, uint32_t hash)
+pinctrl_find_buffered_packets(const struct in6_addr *ip, uint32_t hash)
 {
     struct buffered_packets *qp;
 
     HMAP_FOR_EACH_WITH_HASH (qp, hmap_node, hash,
                              &buffered_packets_map) {
-        if (!memcmp(&qp->ip, ip, sizeof(ovs_be128))) {
+        if (IN6_ARE_ADDR_EQUAL(&qp->ip, ip)) {
             return qp;
         }
     }
@@ -331,9 +331,9 @@ pinctrl_find_buffered_packets(const ovs_be128 *ip, uint32_t hash)
 }
 
 static int
-pinctrl_handle_bufferd_packets(const struct flow *ip_flow,
-                               struct dp_packet *pkt_in,
-                               const struct match *md, bool is_arp)
+pinctrl_handle_buffered_packets(const struct flow *ip_flow,
+                                struct dp_packet *pkt_in,
+                                const struct match *md, bool is_arp)
 {
     struct buffered_packets *bp;
     struct dp_packet *clone;
@@ -345,9 +345,8 @@ pinctrl_handle_bufferd_packets(const struct flow *ip_flow,
         addr = ip_flow->ipv6_dst;
     }
 
-    ovs_be128 ip = get_32aligned_be128((const ovs_32aligned_be128 *)&addr);
-    uint32_t hash = hash_bytes(&ip, sizeof(ovs_be128), 0);
-    bp = pinctrl_find_buffered_packets(&ip, hash);
+    uint32_t hash = hash_bytes(&addr, sizeof addr, 0);
+    bp = pinctrl_find_buffered_packets(&addr, hash);
     if (!bp) {
         if (hmap_count(&buffered_packets_map) >= 1000) {
             COVERAGE_INC(pinctrl_drop_buffered_packets_map);
@@ -357,7 +356,7 @@ pinctrl_handle_bufferd_packets(const struct flow *ip_flow,
         bp = xmalloc(sizeof *bp);
         hmap_insert(&buffered_packets_map, &bp->hmap_node, hash);
         bp->head = bp->tail = 0;
-        bp->ip = ip;
+        bp->ip = addr;
     }
     bp->timestamp = time_msec();
     /* clone the packet to send it later with correct L2 address */
@@ -381,7 +380,7 @@ pinctrl_handle_arp(const struct flow *ip_flow, struct dp_packet *pkt_in,
         return;
     }
 
-    pinctrl_handle_bufferd_packets(ip_flow, pkt_in, md, true);
+    pinctrl_handle_buffered_packets(ip_flow, pkt_in, md, true);
 
     /* Compose an ARP packet. */
     uint64_t packet_stub[128 / 8];
@@ -1815,7 +1814,7 @@ struct put_mac_binding {
     /* Key. */
     uint32_t dp_key;
     uint32_t port_key;
-    char ip_s[INET6_ADDRSTRLEN + 1];
+    struct in6_addr ip_key;
 
     /* Value. */
     struct eth_addr mac;
@@ -1839,13 +1838,13 @@ destroy_put_mac_bindings(void)
 
 static struct put_mac_binding *
 pinctrl_find_put_mac_binding(uint32_t dp_key, uint32_t port_key,
-                             const char *ip_s, uint32_t hash)
+                             const struct in6_addr *ip_key, uint32_t hash)
 {
     struct put_mac_binding *pa;
     HMAP_FOR_EACH_WITH_HASH (pa, hmap_node, hash, &put_mac_bindings) {
         if (pa->dp_key == dp_key
             && pa->port_key == port_key
-            && !strcmp(pa->ip_s, ip_s)) {
+            && IN6_ARE_ADDR_EQUAL(&pa->ip_key, ip_key)) {
             return pa;
         }
     }
@@ -1858,24 +1857,19 @@ pinctrl_handle_put_mac_binding(const struct flow *md,
 {
     uint32_t dp_key = ntohll(md->metadata);
     uint32_t port_key = md->regs[MFF_LOG_INPORT - MFF_REG0];
-    char ip_s[INET6_ADDRSTRLEN];
     struct buffered_packets *bp;
-    ovs_be128 ip_key;
+    struct in6_addr ip_key;
 
     if (is_arp) {
-        ovs_be32 ip = htonl(md->regs[0]);
-        inet_ntop(AF_INET, &ip, ip_s, sizeof(ip_s));
-
-        struct in6_addr addr = in6_addr_mapped_ipv4(ip);
-        ip_key = get_32aligned_be128((const ovs_32aligned_be128 *)&addr);
+        ip_key = in6_addr_mapped_ipv4(htonl(md->regs[0]));
     } else {
         ovs_be128 ip6 = hton128(flow_get_xxreg(md, 0));
-        inet_ntop(AF_INET6, &ip6, ip_s, sizeof(ip_s));
-        ip_key = ip6;
+        memcpy(&ip_key, &ip6, sizeof ip_key);
     }
-    uint32_t hash = hash_string(ip_s, hash_2words(dp_key, port_key));
+    uint32_t hash = hash_bytes(&ip_key, sizeof ip_key,
+                               hash_2words(dp_key, port_key));
     struct put_mac_binding *pmb
-        = pinctrl_find_put_mac_binding(dp_key, port_key, ip_s, hash);
+        = pinctrl_find_put_mac_binding(dp_key, port_key, &ip_key, hash);
     if (!pmb) {
         if (hmap_count(&put_mac_bindings) >= 1000) {
             COVERAGE_INC(pinctrl_drop_put_mac_binding);
@@ -1886,13 +1880,13 @@ pinctrl_handle_put_mac_binding(const struct flow *md,
         hmap_insert(&put_mac_bindings, &pmb->hmap_node, hash);
         pmb->dp_key = dp_key;
         pmb->port_key = port_key;
-        ovs_strlcpy_arrays(pmb->ip_s, ip_s);
+        pmb->ip_key = ip_key;
     }
     pmb->timestamp = time_msec();
     pmb->mac = headers->dl_src;
 
     /* send queued pkts */
-    uint32_t bhash = hash_bytes(&ip_key, sizeof(ovs_be128), 0);
+    uint32_t bhash = hash_bytes(&ip_key, sizeof ip_key, 0);
     bp = pinctrl_find_buffered_packets(&ip_key, bhash);
     if (bp) {
         buffered_send_packets(bp, &pmb->mac);
@@ -1946,25 +1940,23 @@ run_put_mac_binding(struct ovsdb_idl_txn *ovnsb_idl_txn,
     snprintf(mac_string, sizeof mac_string,
              ETH_ADDR_FMT, ETH_ADDR_ARGS(pmb->mac));
 
-    /* Check for and update an existing IP-MAC binding for this logical
-     * port.
-     */
+    struct ds ip_s = DS_EMPTY_INITIALIZER;
+    ipv6_format_mapped(&pmb->ip_key, &ip_s);
+
+    /* Update or add an IP-MAC binding for this logical port. */
     const struct sbrec_mac_binding *b =
         mac_binding_lookup(sbrec_mac_binding_by_lport_ip, pb->logical_port,
-                           pmb->ip_s);
-    if (b) {
-        if (strcmp(b->mac, mac_string)) {
-            sbrec_mac_binding_set_mac(b, mac_string);
-        }
-        return;
+                           ds_cstr(&ip_s));
+    if (!b) {
+        b = sbrec_mac_binding_insert(ovnsb_idl_txn);
+        sbrec_mac_binding_set_logical_port(b, pb->logical_port);
+        sbrec_mac_binding_set_ip(b, ds_cstr(&ip_s));
+        sbrec_mac_binding_set_mac(b, mac_string);
+        sbrec_mac_binding_set_datapath(b, pb->datapath);
+    } else if (strcmp(b->mac, mac_string)) {
+        sbrec_mac_binding_set_mac(b, mac_string);
     }
-
-    /* Add new IP-MAC binding for this logical port. */
-    b = sbrec_mac_binding_insert(ovnsb_idl_txn);
-    sbrec_mac_binding_set_logical_port(b, pb->logical_port);
-    sbrec_mac_binding_set_ip(b, pmb->ip_s);
-    sbrec_mac_binding_set_mac(b, mac_string);
-    sbrec_mac_binding_set_datapath(b, pb->datapath);
+    ds_destroy(&ip_s);
 }
 
 static void
@@ -2605,7 +2597,7 @@ pinctrl_handle_nd_ns(const struct flow *ip_flow, struct dp_packet *pkt_in,
         return;
     }
 
-    pinctrl_handle_bufferd_packets(ip_flow, pkt_in, md, false);
+    pinctrl_handle_buffered_packets(ip_flow, pkt_in, md, false);
 
     uint64_t packet_stub[128 / 8];
     struct dp_packet packet;
