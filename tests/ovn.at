@@ -2673,61 +2673,8 @@ test_arp() {
     fi
 }
 
-# Test router replies to ARP requests from all source ports:
-#
-# 4. Router replies to query for its MAC address from port's own IP address.
-#
-# 5. Router replies to query for its MAC address from any random IP address
-#    in its subnet.
-#
-# 6. No reply to query for IP address other than router IP.
-#
-# 7. No reply to query from another subnet.
 : > mac_bindings.expected
-for i in 1 2 3; do
-  for j in 1 2 3; do
-    for k in 1 2 3; do
-      smac=f00000000$i$j$k               # Source MAC
-      sip=`ip_to_hex 192 168 $i$j $k`    # Source IP
-      rip=`ip_to_hex 192 168 $i$j 254`   # Router IP
-      rmac=00000000ff$i$j                # Router MAC
-      otherip=`ip_to_hex 192 168 $i$j 55` # Some other IP in subnet
-      externalip=`ip_to_hex 1 2 3 4`      # Some other IP not in subnet
-
-      test_arp $i$j$k $smac $sip        $rip        $rmac      #4
-      test_arp $i$j$k $smac $otherip    $rip        $rmac      #5
-      test_arp $i$j$k $smac $sip        $otherip               #6
-
-      # When rip is 192.168.33.254, ARP request from externalip won't be
-      # filtered, because 192.168.33.254 is configured to switch peer port
-      # for lrp33.
-      lrp33_rsp=
-      if test $i = 3 && test $j = 3; then
-        lrp33_rsp=$rmac
-      fi
-      test_arp $i$j$k $smac $externalip $rip        $lrp33_rsp #7
-
-      # MAC binding should be learned from ARP request.
-      host_mac_pretty=f0:00:00:00:0$i:$j$k
-
-      host_ip_pretty=192.168.$i$j.$k
-      echo lrp$i$j,$host_ip_pretty,$host_mac_pretty >> mac_bindings.expected
-
-      # mac_binding is learned and overwritten so only the last one remains.
-      if test $k = 3; then
-          # lrp33 will not learn from ARP request, because 192.168.33.254 is
-          # configured to switch peer port for lrp33.
-          if test $i != 3 || test $j != 3; then
-              host_ip_pretty=192.168.$i$j.55
-              echo lrp$i$j,$host_ip_pretty,$host_mac_pretty >> mac_bindings.expected
-          fi
-      fi
-
-    done
-  done
-done
-
-# 8. Generate an ARP reply for each of the IP addresses ARPed for
+# 4. Generate an ARP reply for each of the IP addresses ARPed for
 #    earlier as #3.
 #
 #    Here, the $s is the VIF that originated the ARP request and $d is
@@ -2771,6 +2718,60 @@ for is in 1 2 3; do
     done
   done
 done
+
+# Test router replies to ARP requests from all source ports:
+#
+# 5. Router replies to query for its MAC address from port's own IP address.
+#
+# 6. Router replies to query for its MAC address from any random IP address
+#    in its subnet.
+#
+# 7. No reply to query for IP address other than router IP.
+#
+# 8. No reply to query from another subnet.
+for i in 1 2 3; do
+  for j in 1 2 3; do
+    for k in 1 2 3; do
+      smac=f00000000$i$j$k               # Source MAC
+      sip=`ip_to_hex 192 168 $i$j $k`    # Source IP
+      rip=`ip_to_hex 192 168 $i$j 254`   # Router IP
+      rmac=00000000ff$i$j                # Router MAC
+      otherip=`ip_to_hex 192 168 $i$j 55` # Some other IP in subnet
+      externalip=`ip_to_hex 1 2 3 4`      # Some other IP not in subnet
+
+      test_arp $i$j$k $smac $sip        $rip        $rmac      #4
+      test_arp $i$j$k $smac $otherip    $rip        $rmac      #5
+      test_arp $i$j$k $smac $sip        $otherip               #6
+
+      # When rip is 192.168.33.254, ARP request from externalip won't be
+      # filtered, because 192.168.33.254 is configured to switch peer port
+      # for lrp33.
+      lrp33_rsp=
+      if test $i = 3 && test $j = 3; then
+        lrp33_rsp=$rmac
+      fi
+      test_arp $i$j$k $smac $externalip $rip        $lrp33_rsp #7
+
+      # MAC binding should be learned from ARP request.
+      host_mac_pretty=f0:00:00:00:0$i:$j$k
+
+      host_ip_pretty=192.168.$i$j.$k
+      echo lrp$i$j,$host_ip_pretty,$host_mac_pretty >> mac_bindings.expected
+
+      # mac_binding is learned and overwritten so only the last one remains.
+      if test $k = 3; then
+          # lrp33 will not learn from ARP request, because 192.168.33.254 is
+          # configured to switch peer port for lrp33.
+          if test $i != 3 || test $j != 3; then
+              host_ip_pretty=192.168.$i$j.55
+              echo lrp$i$j,$host_ip_pretty,$host_mac_pretty >> mac_bindings.expected
+          fi
+      fi
+
+    done
+  done
+done
+
 
 # Allow some time for packet forwarding.
 # XXX This can be improved.
