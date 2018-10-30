@@ -405,6 +405,7 @@ struct ipam_info {
     unsigned long *allocated_ipv4s; /* A bitmap of allocated IPv4s */
     bool ipv6_prefix_set;
     struct in6_addr ipv6_prefix;
+    bool localnet;
 };
 
 /* The 'key' comes from nbs->header_.uuid or nbr->header_.uuid or
@@ -543,13 +544,20 @@ init_ipam_info_for_datapath(struct ovn_datapath *od)
 
     const char *subnet_str = smap_get(&od->nbs->other_config, "subnet");
     const char *ipv6_prefix = smap_get(&od->nbs->other_config, "ipv6_prefix");
+    const char *localnet = smap_get(&od->nbs->other_config,
+                                    "localnet_dynamic");
 
     if (ipv6_prefix) {
         od->ipam_info.ipv6_prefix_set = ipv6_parse(
             ipv6_prefix, &od->ipam_info.ipv6_prefix);
     }
 
-    if (!subnet_str) {
+    if (localnet && !strcmp(localnet, "true"))
+        od->ipam_info.localnet = true;
+    else
+        od->ipam_info.localnet = false;
+
+    if (!subnet_str ) {
         return;
     }
 
@@ -1371,7 +1379,8 @@ build_ipam(struct hmap *datapaths, struct hmap *ports)
             const struct nbrec_logical_switch_port *nbsp = od->nbs->ports[i];
 
             if (!od->ipam_info.allocated_ipv4s &&
-                !od->ipam_info.ipv6_prefix_set) {
+                !od->ipam_info.ipv6_prefix_set &&
+                !od->ipam_info.localnet) {
                 if (nbsp->dynamic_addresses) {
                     nbrec_logical_switch_port_set_dynamic_addresses(nbsp,
                                                                     NULL);
@@ -1388,7 +1397,8 @@ build_ipam(struct hmap *datapaths, struct hmap *ports)
 
             int num_dynamic_addresses = 0;
             for (size_t j = 0; j < nbsp->n_addresses; j++) {
-                if (!is_dynamic_lsp_address(nbsp->addresses[j])) {
+                if (!is_dynamic_lsp_address(nbsp->addresses[j]) &&
+                    strcmp(nbsp->addresses[j], "unknown")) {
                     continue;
                 }
                 if (num_dynamic_addresses) {

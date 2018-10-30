@@ -5633,6 +5633,15 @@ AT_CHECK([ovn-nbctl get Logical-Switch-Port p53 dynamic_addresses], [0],
     ["00:11:22:a8:64:05 192.168.100.4"
 ])
 
+# add localnet port and verify it get a L2 address dynamically assigned
+ovn-nbctl ls-add sw7
+ovn-nbctl --wait=hv set NB_Global . options:mac_prefix="00:11:22:33:44:55"
+ovn-nbctl --wait=sb set Logical-Switch sw7 other_config:localnet_dynamic=true
+ovn-nbctl --wait=sb lsp-add sw7 p70 -- lsp-set-addresses p70 unknown
+AT_CHECK([ovn-nbctl get Logical-Switch-Port p70 dynamic_addresses], [0],
+    ["00:11:22:00:00:02"
+])
+
 as ovn-sb
 OVS_APP_EXIT_AND_WAIT([ovsdb-server])
 
