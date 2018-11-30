@@ -80,7 +80,8 @@ struct ovn_extend_table;
     OVNACT(LOG,               ovnact_log)             \
     OVNACT(PUT_ND_RA_OPTS,    ovnact_put_opts)        \
     OVNACT(ND_NS,             ovnact_nest)            \
-    OVNACT(SET_METER,         ovnact_set_meter)
+    OVNACT(SET_METER,         ovnact_set_meter)       \
+    OVNACT(SEND_EVENT,        ovnact_controller_event)  \
 
 /* enum ovnact_type, with a member OVNACT_<ENUM> for each action. */
 enum OVS_PACKED_ENUM ovnact_type {
@@ -294,6 +295,12 @@ struct ovnact_set_meter {
     uint64_t burst;                  /* burst rate field, in kbps. */
 };
 
+/* OVNACT_EVENT. */
+struct ovnact_controller_event {
+    struct ovnact ovnact;
+    int event_type;   /* controller event type */
+};
+
 /* Internal use by the helpers below. */
 void ovnact_init(struct ovnact *, enum ovnact_type, size_t len);
 void *ovnact_put(struct ofpbuf *, enum ovnact_type, size_t len);
@@ -452,6 +459,9 @@ enum action_opcode {
         * The actions, in OpenFlow 1.3 format, follow the action_header.
         */
     ACTION_OPCODE_ND_NA_ROUTER,
+
+    /* "send_event (event_type)" */
+    ACTION_OPCODE_EVENT,
 };
 
 /* Header. */
