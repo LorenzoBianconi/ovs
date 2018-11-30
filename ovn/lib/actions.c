@@ -1185,6 +1185,27 @@ parse_CLONE(struct action_context *ctx)
 }
 
 static void
+parse_send_event(struct action_context *ctx)
+{
+    struct ovnact_controller_event *event;
+    int event_type = 0;
+
+    lexer_force_match(ctx->lexer, LEX_T_LPAREN);
+    if (lexer_is_int(ctx->lexer)) {
+        lexer_get_int(ctx->lexer, &event_type);
+    }
+    lexer_force_match(ctx->lexer, LEX_T_RPAREN);
+
+    event = ovnact_put_SEND_EVENT(ctx->ovnacts);
+    event->event_type = event_type;
+}
+
+static void
+ovnact_controller_event_free(struct ovnact_controller_event *event OVS_UNUSED)
+{
+}
+
+static void
 format_nested_action(const struct ovnact_nest *on, const char *name,
                      struct ds *s)
 {
@@ -1239,6 +1260,13 @@ static void
 format_CLONE(const struct ovnact_nest *nest, struct ds *s)
 {
     format_nested_action(nest, "clone", s);
+}
+
+static void
+format_SEND_EVENT(const struct ovnact_controller_event *event,
+                  struct ds *s)
+{
+    ds_put_format(s, "send_event(%d);", event->event_type);
 }
 
 static void
@@ -1335,6 +1363,21 @@ encode_CLONE(const struct ovnact_nest *on,
     ofpacts->header = clone;
     ofpact_finish_CLONE(ofpacts, &clone);
 }
+
+static void
+encode_SEND_EVENT(const struct ovnact_controller_event *event,
+                  const struct ovnact_encode_params *ep OVS_UNUSED,
+                  struct ofpbuf *ofpacts)
+{
+    size_t oc_offset;
+
+    oc_offset = encode_start_controller_op(ACTION_OPCODE_EVENT, false,
+                                           NX_CTLR_NO_METER, ofpacts);
+    ovs_be32 ofs = htonl(event->event_type);
+    ofpbuf_put(ofpacts, &ofs, sizeof ofs);
+    encode_finish_controller_op(oc_offset, ofpacts);
+}
+
 
 static void
 ovnact_nest_free(struct ovnact_nest *on)
@@ -2392,6 +2435,8 @@ parse_action(struct action_context *ctx)
         parse_LOG(ctx);
     } else if (lexer_match_id(ctx->lexer, "set_meter")) {
         parse_set_meter_action(ctx);
+    } else if (lexer_match_id(ctx->lexer, "send_event")) {
+        parse_send_event(ctx);
     } else {
         lexer_syntax_error(ctx->lexer, "expecting action");
     }

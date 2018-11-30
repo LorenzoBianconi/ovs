@@ -1194,6 +1194,66 @@ exit:
 }
 
 static void
+pinctrl_handle_event(const struct flow *ip_flow, struct ofpbuf *userdata)
+{
+    uint32_t hash, event;
+    ovs_be32 *pevent;
+    char *data;
+
+    pevent = ofpbuf_try_pull(userdata, sizeof *pevent);
+    if (!pevent) {
+        static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 5);
+        VLOG_WARN_RL(&rl, "event not present in the userdata");
+        return;
+    }
+
+    event = ntohl(*pevent);
+    switch (event) {
+    case OVN_EVENT_UNIDLING: {
+        struct in6_addr ip_key;
+
+        if (ip_flow->dl_type != htons(ETH_TYPE_IP) &&
+            ip_flow->dl_type != htons(ETH_TYPE_IPV6)) {
+            return;
+        }
+
+        if (ip_flow->dl_type == htons(ETH_TYPE_IP)) {
+            ip_key = in6_addr_mapped_ipv4(ip_flow->nw_dst);
+            data = xmalloc(INET_ADDRSTRLEN);
+            inet_ntop(AF_INET, &ip_flow->nw_dst, data, INET_ADDRSTRLEN);
+        } else {
+            ip_key = ip_flow->ipv6_dst;
+            data = xmalloc(INET6_ADDRSTRLEN);
+            inet_ntop(AF_INET6, &ip_key, data, INET6_ADDRSTRLEN);
+        }
+        hash = hash_bytes(&ip_key, sizeof ip_key, event);
+        break;
+    }
+    default:
+        return;
+    }
+
+    struct controller_event *ce = pinctrl_find_controller_event(event,
+                                                                data, hash);
+    if (!ce) {
+        if (hmap_count(&event_table) >= 1000) {
+            COVERAGE_INC(pinctrl_drop_controller_event);
+            goto out;
+        }
+
+        ce = xmalloc(sizeof *ce);
+        hmap_insert(&event_table, &ce->hmap_node, hash);
+
+        ce->event = event;
+        ds_init(&ce->data);
+        ds_put_cstr(&ce->data, data);
+    }
+
+out:
+    free(data);
+}
+
+static void
 put_be16(struct ofpbuf *buf, ovs_be16 x)
 {
     ofpbuf_put(buf, &x, sizeof x);
@@ -1551,6 +1611,10 @@ process_packet_in(const struct ofp_header *msg,
     case ACTION_OPCODE_TCP_RESET:
         pinctrl_handle_tcp_reset(&headers, &packet, &pin.flow_metadata,
                                  &userdata);
+        break;
+
+    case ACTION_OPCODE_EVENT:
+        pinctrl_handle_event(&headers, &userdata);
         break;
 
     default:
