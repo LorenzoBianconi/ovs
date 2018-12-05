@@ -70,6 +70,8 @@ static const char *unixctl_path;
 static struct hmap macam = HMAP_INITIALIZER(&macam);
 static struct eth_addr mac_prefix;
 
+static bool unidling_en;
+
 #define MAX_OVN_TAGS 4096
 
 /* Pipeline stages. */
@@ -3343,6 +3345,20 @@ build_pre_lb(struct ovn_datapath *od, struct hmap *lflows)
             ip_address_and_port_from_lb_key(node->key, &ip_address, &port,
                                             &addr_family);
             if (!ip_address) {
+                continue;
+            }
+
+            if (unidling_en && !strlen(node->value)) {
+                struct ds action = DS_EMPTY_INITIALIZER;
+                struct ds match = DS_EMPTY_INITIALIZER;
+
+                ds_put_format(&match, "ip4.dst == %s", ip_address);
+                ds_put_format(&action, "send_event(%d);",
+                              OVN_EVENT_UNIDLING);
+                ovn_lflow_add(lflows, od, S_SWITCH_IN_PRE_LB, 120,
+                              ds_cstr(&match), ds_cstr(&action));
+                ds_destroy(&match);
+                ds_destroy(&action);
                 continue;
             }
 
@@ -7301,6 +7317,8 @@ ovnnb_db_run(struct northd_context *ctx,
             mac_prefix = addr;
         }
     }
+
+    unidling_en = smap_get_bool(&nb->options, "unidling", false);
 
     cleanup_macam(&macam);
 }
