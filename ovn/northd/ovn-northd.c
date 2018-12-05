@@ -70,6 +70,8 @@ static const char *unixctl_path;
 static struct hmap macam = HMAP_INITIALIZER(&macam);
 static struct eth_addr mac_prefix;
 
+static bool controller_event_en;
+
 #define MAX_OVN_TAGS 4096
 
 /* Pipeline stages. */
@@ -3343,6 +3345,23 @@ build_pre_lb(struct ovn_datapath *od, struct hmap *lflows)
             ip_address_and_port_from_lb_key(node->key, &ip_address, &port,
                                             &addr_family);
             if (!ip_address) {
+                continue;
+            }
+
+            if (controller_event_en && !strlen(node->value)) {
+                char *match, *action;
+
+                if (addr_family == AF_INET) {
+                    match = xasprintf("ip && ip4.dst == %s", ip_address);
+                } else {
+                    match = xasprintf("ip && ip6.dst == %s", ip_address);
+                }
+                action = xasprintf("send_event(%d);",
+                                   OVN_EVENT_EMPTY_LB_BACKENDS);
+                ovn_lflow_add(lflows, od, S_SWITCH_IN_PRE_LB, 120,
+                              match, action);
+                free(match);
+                free(action);
                 continue;
             }
 
@@ -7301,6 +7320,8 @@ ovnnb_db_run(struct northd_context *ctx,
             mac_prefix = addr;
         }
     }
+
+    controller_event_en = smap_get_bool(&nb->options, "controller_event", false);
 
     cleanup_macam(&macam);
 }
