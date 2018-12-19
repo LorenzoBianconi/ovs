@@ -3333,4 +3333,19 @@ tcp.flags = RST;
       <column name="external_ids"/>
     </group>
   </table>
+  <table name="Event_table" title="Controller Event table">
+    <p>
+      Database table used by ovn-controller to report CMS related
+      events
+    </p>
+    <column name="event_type">
+      Event type occurred
+    </column>
+    <column name="data">
+      Event specific data reported to the CMS
+    </column>
+    <column name="done" type='{"type": "boolean"}'>
+      Value used to indicate if the event has been consumed by the CMS
+    </column>
+  </table>
 </database>
