@@ -1,7 +1,7 @@
 {
     "name": "OVN_Southbound",
-    "version": "2.0.0",
-    "cksum": "3109267860 15085",
+    "version": "2.1.0",
+    "cksum": "2927456240 15514",
     "tables": {
         "SB_Global": {
             "columns": {
@@ -305,4 +305,14 @@
                     "type": {"key": "string", "value": "string",
                              "min": 0, "max": "unlimited"}}},
             "indexes": [["name"]],
-            "isRoot": false}}}
+            "isRoot": false},
+        "Controller_Event": {
+            "columns": {
+                "event_type": {"type": {"key": {"type": "string",
+                               "enum": ["set", ["empty_lb_backends"]]}}},
+                "event_info": {"type": {"key": "string", "value": "string"}},
+                "handled": {"type": "boolean"}
+            },
+            "indexes": [["event_type", "event_info"]],
+            "isRoot": true
+         }}}

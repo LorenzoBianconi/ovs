@@ -113,6 +113,104 @@ static void send_ipv6_ras(
 
 COVERAGE_DEFINE(pinctrl_drop_put_mac_binding);
 COVERAGE_DEFINE(pinctrl_drop_buffered_packets_map);
+COVERAGE_DEFINE(pinctrl_drop_controller_event);
+
+struct controller_event {
+    struct hmap_node hmap_node;
+
+    uint32_t event;
+    struct ds data;
+};
+static struct hmap event_table;
+
+static void init_event_table(void)
+{
+    hmap_init(&event_table);
+}
+
+static void event_table_flush(void)
+{
+    struct controller_event *ce;
+    HMAP_FOR_EACH_POP (ce, hmap_node, &event_table) {
+        ds_destroy(&ce->data);
+        free(ce);
+    }
+}
+
+static void event_table_destroy(void)
+{
+    event_table_flush();
+    hmap_destroy(&event_table);
+}
+
+static struct controller_event *
+pinctrl_find_controller_event(uint32_t event, char *data, uint32_t hash)
+{
+    struct controller_event *ce;
+    HMAP_FOR_EACH_WITH_HASH (ce, hmap_node, hash, &event_table) {
+        if (!strcmp(ds_cstr(&ce->data), data) &&
+            ce->event == event) {
+            return ce;
+        }
+    }
+    return NULL;
+}
+
+static const struct sbrec_controller_event *
+event_table_lookup(struct ovsdb_idl_index *sbrec_controller_event_by_data_event,
+                   struct controller_event *event)
+{
+    struct sbrec_controller_event *ce = sbrec_controller_event_index_init_row(
+        sbrec_controller_event_by_data_event);
+    const struct smap event_info = SMAP_CONST1(&event_info, "vip", ds_cstr(&event->data));
+
+    sbrec_controller_event_index_set_event_type(ce, event_to_string(event->event));
+    sbrec_controller_event_index_set_event_info(ce, &event_info);
+
+    const struct sbrec_controller_event *ret
+        = sbrec_controller_event_index_find(sbrec_controller_event_by_data_event, ce);
+
+    sbrec_controller_event_index_destroy_row(ce);
+
+    return ret;
+}
+
+static void
+controller_event_run(struct ovsdb_idl_txn *ovnsb_idl_txn,
+                     struct ovsdb_idl_index *sbrec_controller_event_by_data_event,
+                     const struct sbrec_controller_event_table * ce_table)
+{
+    const struct sbrec_controller_event *cur_event, *next_event;
+
+    if (!ovnsb_idl_txn) {
+        return;
+    }
+
+    struct controller_event *ce;
+    HMAP_FOR_EACH (ce, hmap_node, &event_table) {
+        const struct sbrec_controller_event *event = event_table_lookup(
+                sbrec_controller_event_by_data_event, ce);
+        if (!event) {
+            const struct smap event_info = SMAP_CONST1(&event_info, "vip",
+                                                       ds_cstr(&ce->data));
+
+            event = sbrec_controller_event_insert(ovnsb_idl_txn);
+            sbrec_controller_event_set_event_type(event,
+                                             event_to_string(ce->event));
+            sbrec_controller_event_set_event_info(event, &event_info);
+            sbrec_controller_event_set_handled(event, false);
+        }
+    }
+    event_table_flush();
+
+    /* flush 'handled' rows */
+    SBREC_CONTROLLER_EVENT_TABLE_FOR_EACH_SAFE(cur_event, next_event,
+                                               ce_table) {
+        if (cur_event->handled) {
+            sbrec_controller_event_delete(cur_event);
+        }
+    }
+}
 
 void
 pinctrl_init(void)
@@ -123,6 +221,7 @@ pinctrl_init(void)
     init_send_garps();
     init_ipv6_ras();
     init_buffered_packets_map();
+    init_event_table();
 }
 
 static ovs_be32
@@ -1510,7 +1609,9 @@ pinctrl_run(struct ovsdb_idl_txn *ovnsb_idl_txn,
             struct ovsdb_idl_index *sbrec_port_binding_by_key,
             struct ovsdb_idl_index *sbrec_port_binding_by_name,
             struct ovsdb_idl_index *sbrec_mac_binding_by_lport_ip,
+            struct ovsdb_idl_index *sbrec_controller_event_by_data_event,
             const struct sbrec_dns_table *dns_table,
+            const struct sbrec_controller_event_table * ce_table,
             const struct ovsrec_bridge *br_int,
             const struct sbrec_chassis *chassis,
             const struct hmap *local_datapaths,
@@ -1559,6 +1660,8 @@ pinctrl_run(struct ovsdb_idl_txn *ovnsb_idl_txn,
     send_ipv6_ras(sbrec_port_binding_by_datapath,
                   sbrec_port_binding_by_name, local_datapaths);
     buffered_packets_map_gc();
+    controller_event_run(ovnsb_idl_txn, sbrec_controller_event_by_data_event,
+                         ce_table);
 }
 
 /* Table of ipv6_ra_state structures, keyed on logical port name */
@@ -1870,6 +1973,7 @@ pinctrl_destroy(void)
     destroy_send_garps();
     destroy_ipv6_ras();
     destroy_buffered_packets_map();
+    event_table_destroy();
 }
 
 /* Implementation of the "put_arp" and "put_nd" OVN actions.  These
