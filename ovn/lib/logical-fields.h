@@ -20,6 +20,23 @@
 
 struct shash;
 
+enum ovn_controller_event {
+    OVN_EVENT_UNIDLING = 1,
+    OVN_EVENT_MAX,
+};
+
+static inline char *
+event_to_string(enum ovn_controller_event event)
+{
+    switch (event) {
+    case OVN_EVENT_UNIDLING:
+        return "unidling";
+    case OVN_EVENT_MAX:
+    default:
+        return "";
+    }
+}
+
 /* Logical fields.
  *
  * These values are documented in ovn-architecture(7), please update the
