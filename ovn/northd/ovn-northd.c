@@ -1166,13 +1166,16 @@ dynamic_ip4_changed(const char *lsp_addrs,
          */
         return DYNAMIC;
     } else {
+        char ipv6_s[IPV6_SCAN_LEN + 1];
         ovs_be32 new_ip;
         int n = 0;
 
-        if (ovs_scan(lsp_addrs, "dynamic "IP_SCAN_FMT"%n",
+        if ((ovs_scan(lsp_addrs, "dynamic "IP_SCAN_FMT"%n",
                      IP_SCAN_ARGS(&new_ip), &n)
-            && lsp_addrs[n] == '\0') {
-
+             && lsp_addrs[n] == '\0') ||
+            (ovs_scan(lsp_addrs, "dynamic "IP_SCAN_FMT" "IPV6_SCAN_FMT"%n",
+                      IP_SCAN_ARGS(&new_ip), ipv6_s, &n)
+             && lsp_addrs[n] == '\0')) {
             index = ntohl(new_ip) - ipam->start_ipv4;
             if (ntohl(new_ip) < ipam->start_ipv4 ||
                 index > ipam->total_ipv4s ||
@@ -1278,6 +1281,7 @@ static void
 set_dynamic_updates(const char *addrspec,
                     struct dynamic_address_update *update)
 {
+    char ipv6_s[IPV6_SCAN_LEN + 1];
     struct eth_addr mac;
     ovs_be32 ip;
     int n = 0;
@@ -1290,9 +1294,12 @@ set_dynamic_updates(const char *addrspec,
         update->mac = DYNAMIC;
     }
 
-    if (ovs_scan(addrspec, "dynamic "IP_SCAN_FMT"%n",
+    if ((ovs_scan(addrspec, "dynamic "IP_SCAN_FMT"%n",
                  IP_SCAN_ARGS(&ip), &n)
-        && addrspec[n] == '\0') {
+         && addrspec[n] == '\0') ||
+        (ovs_scan(addrspec, "dynamic "IP_SCAN_FMT" "IPV6_SCAN_FMT"%n",
+                  IP_SCAN_ARGS(&ip), ipv6_s, &n)
+         && addrspec[n] == '\0')) {
         update->ipv4 = STATIC;
         update->static_ip = ip;
     } else if (update->op->od->ipam_info.allocated_ipv4s) {
