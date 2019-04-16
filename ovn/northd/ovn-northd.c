@@ -6895,6 +6895,18 @@ build_lrouter_flows(struct hmap *datapaths, struct hmap *ports,
             copy_ra_to_sb(op, address_mode);
         }
 
+        /* enable IPv6 prefix delegation */
+        if (smap_get_bool(&op->nbrp->options,
+                          "prefix_delegation", false)) {
+            struct smap options;
+
+            smap_clone(&options, &op->sb->options);
+            smap_add(&options, "ipv6_prefix_delegation", "true");
+
+            sbrec_port_binding_set_options(op->sb, &options);
+            smap_destroy(&options);
+        }
+
         ds_clear(&match);
         ds_put_format(&match, "inport == %s && ip6.dst == ff02::2 && nd_rs",
                               op->json_key);
