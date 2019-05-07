@@ -3206,6 +3206,8 @@ sha=f00000000012
 test_arp 12 $sha $spa $tpa
 OVS_WAIT_UNTIL([ovn-sbctl find mac_binding ip="192.168.1.100" | grep f0:00:00:00:00:12])
 ovn-nbctl --wait=hv sync
+# give more time to let hv sends the queued ip packet
+sleep 1
 
 # Send an IP packet from lp21 to 192.168.1.100, which should go to lp12.
 
