@@ -20,6 +20,32 @@
 
 struct shash;
 
+enum ovn_controller_event {
+    OVN_EVENT_EMPTY_LB_BACKENDS = 0,
+    OVN_EVENT_MAX,
+};
+
+static inline char *
+event_to_string(enum ovn_controller_event event)
+{
+    switch (event) {
+    case OVN_EVENT_EMPTY_LB_BACKENDS:
+        return "empty_lb_backends";
+    case OVN_EVENT_MAX:
+    default:
+        return "";
+    }
+}
+
+static inline int
+string_to_event(const char *s)
+{
+    if (!strcmp(s, "empty_lb_backends")) {
+        return OVN_EVENT_EMPTY_LB_BACKENDS;
+    }
+    return -1;
+}
+
 /* Logical fields.
  *
  * These values are documented in ovn-architecture(7), please update the
