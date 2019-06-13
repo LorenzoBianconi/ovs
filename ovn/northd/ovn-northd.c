@@ -70,6 +70,8 @@ static const char *unixctl_path;
 static struct hmap macam = HMAP_INITIALIZER(&macam);
 static struct eth_addr mac_prefix;
 
+static bool prefix_delegation;
+
 #define MAX_OVN_TAGS 4096
 
 /* Pipeline stages. */
@@ -4626,8 +4628,10 @@ build_lswitch_flows(struct hmap *datapaths, struct hmap *ports,
             continue;
         }
 
-        if (!op->nbsp->dhcpv4_options && !op->nbsp->dhcpv6_options) {
-            /* CMS has disabled both native DHCPv4 and DHCPv6 for this lport.
+        if (!op->nbsp->dhcpv4_options && !op->nbsp->dhcpv6_options &&
+            !prefix_delegation) {
+            /* CMS has disabled both native DHCPv4, DHCPv6 and preflix
+             * delegation for this lport.
              */
             continue;
         }
@@ -4719,17 +4723,6 @@ build_lswitch_flows(struct hmap *datapaths, struct hmap *ports,
             for (size_t j = 0; j < op->lsp_addrs[i].n_ipv6_addrs; j++) {
                 struct ds options_action = DS_EMPTY_INITIALIZER;
                 struct ds response_action = DS_EMPTY_INITIALIZER;
-                ds_clear(&match);
-                ds_put_format(&match, "inport == %s && ipv6"
-                              " && udp.src == 547 && udp.dst == 546",
-                              is_external ? op->od->localnet_port->json_key
-                                          : op->json_key);
-                ds_clear(&actions);
-                ds_put_format(&actions, "reg0 = 0; dhcp_server_pkt { "
-                              "eth.dst <-> eth.src; ip6.dst <-> ip6.src; "
-                              "outport <-> inport; output; };");
-                ovn_lflow_add(lflows, op->od, S_SWITCH_IN_DHCP_RESPONSE, 100,
-                              ds_cstr(&match), ds_cstr(&actions));
                 if (build_dhcpv6_action(
                         op, &op->lsp_addrs[i].ipv6_addrs[j].addr,
                         &options_action, &response_action)) {
@@ -5779,6 +5772,32 @@ build_lrouter_flows(struct hmap *datapaths, struct hmap *ports,
         /* Pass other traffic not already handled to the next table for
          * routing. */
         ovn_lflow_add(lflows, od, S_ROUTER_IN_IP_INPUT, 0, "1", "next;");
+    }
+
+    /* DHCPv6 reply handling */
+    HMAP_FOR_EACH (op, key_node, ports) {
+        if (!op->nbrp) {
+            continue;
+        }
+
+        struct lport_addresses lrp_networks;
+        if (!extract_lrp_networks(op->nbrp, &lrp_networks)) {
+            continue;
+        }
+
+        for (size_t i = 0; i < lrp_networks.n_ipv6_addrs; i++) {
+            ds_clear(&actions);
+            ds_clear(&match);
+            ds_put_format(&match, "inport == %s && ip6.dst == %s"
+                          " && udp.src == 547 && udp.dst == 546",
+                          lrp_networks.ipv6_addrs[i].addr_s,
+                          op->json_key);
+            ds_put_format(&actions, "reg0 = 0; dhcp_server_pkt { "
+                          "eth.dst <-> eth.src; ip6.dst <-> ip6.src; "
+                          "outport <-> inport; output; };");
+            ovn_lflow_add(lflows, op->od, S_ROUTER_IN_IP_INPUT, 100,
+                          ds_cstr(&match), ds_cstr(&actions));
+        }
     }
 
     /* Logical router ingress table 1: IP Input for IPv4. */
@@ -6907,8 +6926,9 @@ build_lrouter_flows(struct hmap *datapaths, struct hmap *ports,
         }
 
         /* enable IPv6 prefix delegation */
-        if (smap_get_bool(&op->nbrp->options,
-                          "prefix_delegation", false)) {
+        prefix_delegation = smap_get_bool(&op->nbrp->options,
+                                          "prefix_delegation", false);
+        if (prefix_delegation) {
             struct smap options;
 
             smap_clone(&options, &op->sb->options);
@@ -6917,6 +6937,7 @@ build_lrouter_flows(struct hmap *datapaths, struct hmap *ports,
             sbrec_port_binding_set_options(op->sb, &options);
             smap_destroy(&options);
         }
+
 
         ds_clear(&match);
         ds_put_format(&match, "inport == %s && ip6.dst == ff02::2 && nd_rs",
