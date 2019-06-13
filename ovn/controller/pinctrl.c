@@ -750,6 +750,26 @@ pinctrl_handle_tcp_reset(struct rconn *swconn, const struct flow *ip_flow,
     dp_packet_uninit(&packet);
 }
 
+static void
+pinctrl_handle_dhcp_server(struct rconn *swconn, const struct flow *ip_flow,
+                           struct dp_packet *pkt_in, const struct match *md,
+                           struct ofpbuf *userdata)
+{
+    uint64_t packet_stub[256 / 8];
+    struct dp_packet packet;
+
+    dp_packet_use_stub(&packet, packet_stub, sizeof packet_stub);
+    dp_packet_clear(&packet);
+    packet.packet_type = htonl(PT_ETH);
+
+    struct eth_header *eh = dp_packet_put_zeros(&packet, sizeof *eh);
+    eh->eth_dst = ip_flow->dl_dst;
+    eh->eth_src = ip_flow->dl_src;
+
+    VLOG_WARN("%s-%d: dst="ETH_ADDR_FMT" src="ETH_ADDR_FMT"\n",
+              __func__, __LINE__, ETH_ADDR_ARGS(eh->eth_dst), ETH_ADDR_ARGS(eh->eth_src));
+}
+
 /* Called with in the pinctrl_handler thread context. */
 static void
 pinctrl_handle_put_dhcp_opts(
@@ -1758,6 +1778,11 @@ process_packet_in(struct rconn *swconn, const struct ofp_header *msg)
     case ACTION_OPCODE_PUT_ICMP4_FRAG_MTU:
         pinctrl_handle_put_icmp4_frag_mtu(swconn, &headers, &packet,
                                           &pin, &userdata, &continuation);
+        break;
+
+    case ACTION_OPCODE_DHCP_SERVER:
+        pinctrl_handle_dhcp_server(swconn, &headers, &packet,
+                                   &pin.flow_metadata, &userdata);
         break;
 
     default:

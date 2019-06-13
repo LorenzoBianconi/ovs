@@ -1828,6 +1828,27 @@ ovnact_put_opts_free(struct ovnact_put_opts *pdo)
 }
 
 static void
+parse_DHCP_SERVER_PKT(const struct ovnact_nest *on,
+                      const struct ovnact_encode_params *ep,
+                      struct ofpbuf *ofpacts)
+{
+}
+
+static void
+format_DHCP_SERVER_PKT(const struct ovnact_nest *nest, struct ds *s)
+{
+    format_nested_action(nest, "dhcp_server_pkt", s);
+}
+
+static void
+encode_DHCP_SERVER_PKT(const struct ovnact_nest *on,
+                       const struct ovnact_encode_params *ep,
+                       struct ofpbuf *ofpacts)
+{
+    encode_nested_actions(on, ep, ACTION_OPCODE_DHCP_SERVER, ofpacts);
+}
+
+static void
 parse_SET_QUEUE(struct action_context *ctx)
 {
     int queue_id;

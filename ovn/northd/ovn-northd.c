@@ -4719,6 +4719,17 @@ build_lswitch_flows(struct hmap *datapaths, struct hmap *ports,
             for (size_t j = 0; j < op->lsp_addrs[i].n_ipv6_addrs; j++) {
                 struct ds options_action = DS_EMPTY_INITIALIZER;
                 struct ds response_action = DS_EMPTY_INITIALIZER;
+                ds_clear(&match);
+                ds_put_format(&match, "inport == %s && ipv6"
+                              " && udp.src == 547 && udp.dst == 546",
+                              is_external ? op->od->localnet_port->json_key
+                                          : op->json_key);
+                ds_clear(&actions);
+                ds_put_format(&actions, "reg0 = 0; dhcp_server_pkt { "
+                              "eth.dst <-> eth.src; ip6.dst <-> ip6.src; "
+                              "outport <-> inport; output; };");
+                ovn_lflow_add(lflows, op->od, S_SWITCH_IN_DHCP_RESPONSE, 100,
+                              ds_cstr(&match), ds_cstr(&actions));
                 if (build_dhcpv6_action(
                         op, &op->lsp_addrs[i].ipv6_addrs[j].addr,
                         &options_action, &response_action)) {
