@@ -751,23 +751,112 @@ pinctrl_handle_tcp_reset(struct rconn *swconn, const struct flow *ip_flow,
 }
 
 static void
+pinctrl_parse_dhcv6_advt(struct rconn *swconn, const struct flow *ip_flow,
+                         struct dp_packet *pkt_in, const struct match *md,
+                         struct ofpbuf *userdata)
+{
+    uint64_t packet_stub[256 / 8];
+    struct dp_packet packet;
+    int len = 0;
+
+    struct udp_header *udp_in = dp_packet_l4(pkt_in);
+    size_t dlen = MIN(ntohs(udp_in->udp_len), dp_packet_l4_size(pkt_in));
+    uint8_t *end = (uint8_t *)udp_in + dlen;
+    uint8_t data[dlen];
+
+    unsigned char *in_dhcpv6_data = (unsigned char *)(udp_in + 1);
+    in_dhcpv6_data += 4;
+    while (in_dhcpv6_data < end) {
+        struct dhcpv6_opt_header *in_opt =
+             (struct dhcpv6_opt_header *)in_dhcpv6_data;
+        int opt_len = sizeof *in_opt + ntohs(in_opt->len);
+        switch (ntohs(in_opt->code)) {
+        case DHCPV6_OPT_IA_PD: {
+            int orig_len = len, hdr_len = 0, size = sizeof *in_opt + 12;
+            memcpy(&data[len], in_opt, size);
+            in_opt = (struct dhcpv6_opt_header *)(in_dhcpv6_data + size);
+            len += size;
+            while (size < opt_len) {
+                int flen = sizeof *in_opt + ntohs(in_opt->len);
+                if (ntohs(in_opt->code) == DHCPV6_OPT_IA_PREFIX) {
+                    memcpy(&data[len], in_opt, flen);
+                    hdr_len += flen;
+                    len += flen;
+                }
+                size += flen;
+                in_opt = (struct dhcpv6_opt_header *)(in_dhcpv6_data + size);
+            }
+            in_opt = (struct dhcpv6_opt_header *)&data[orig_len];
+            in_opt->len = htons(hdr_len + 12);
+            break;
+        }
+        case DHCPV6_OPT_SERVER_ID_CODE:
+        case DHCPV6_OPT_CLIENT_ID_CODE:
+            memcpy(&data[len], in_opt, opt_len);
+            len += opt_len;
+            break;
+        default:
+            break;
+        }
+        in_dhcpv6_data += opt_len;
+    }
+
+    dp_packet_use_stub(&packet, packet_stub, sizeof packet_stub);
+    eth_compose(&packet, ip_flow->dl_dst, ip_flow->dl_src, ETH_TYPE_IPV6,
+                IPV6_HEADER_LEN);
+
+    struct udp_header *udp_h = compose_ipv6(&packet, IPPROTO_UDP,
+                                            &ip_flow->ipv6_src,
+                                            &ip_flow->ipv6_dst, 0, 0, 255,
+                                            len + UDP_HEADER_LEN + 4);
+    udp_h->udp_len = htons(len + UDP_HEADER_LEN + 4);
+    udp_h->udp_csum = 0;
+    packet_set_udp_port(&packet, htons(546), htons(547));
+
+    unsigned char *dhcp_hdr = (unsigned char *)(udp_h + 1);
+    *dhcp_hdr = DHCPV6_MSG_TYPE_REQUEST;
+    memcpy(dhcp_hdr + 4, data, len);
+
+    uint32_t csum = packet_csum_pseudoheader6(dp_packet_l3(&packet));
+    csum = csum_continue(csum, udp_h, dp_packet_size(&packet) -
+                         ((const unsigned char *)udp_h -
+                          (const unsigned char *)dp_packet_eth(&packet)));
+    udp_h->udp_csum = csum_finish(csum);
+    if (!udp_h->udp_csum) {
+        udp_h->udp_csum = htons(0xffff);
+    }
+
+    if (ip_flow->vlans[0].tci & htons(VLAN_CFI)) {
+        eth_push_vlan(&packet, htons(ETH_TYPE_VLAN_8021Q),
+                      ip_flow->vlans[0].tci);
+    }
+
+    set_actions_and_enqueue_msg(swconn, &packet, md, userdata);
+    dp_packet_uninit(&packet);
+}
+
+static void
 pinctrl_handle_dhcp6_server(struct rconn *swconn, const struct flow *ip_flow,
                             struct dp_packet *pkt_in, const struct match *md,
                             struct ofpbuf *userdata)
 {
-    uint64_t packet_stub[256 / 8];
-    struct dp_packet packet;
+    if (ip_flow->dl_type != htons(ETH_TYPE_IPV6) ||
+        ip_flow->nw_proto != IPPROTO_UDP) {
+        return;
+    }
 
-    dp_packet_use_stub(&packet, packet_stub, sizeof packet_stub);
-    dp_packet_clear(&packet);
-    packet.packet_type = htonl(PT_ETH);
+    struct udp_header *udp_in = dp_packet_l4(pkt_in);
+    unsigned char *dhcp_hdr = (unsigned char *)(udp_in + 1);
 
-    struct eth_header *eh = dp_packet_put_zeros(&packet, sizeof *eh);
-    eh->eth_dst = ip_flow->dl_dst;
-    eh->eth_src = ip_flow->dl_src;
-
-    VLOG_WARN("%s-%d: dst="ETH_ADDR_FMT" src="ETH_ADDR_FMT"\n",
-              __func__, __LINE__, ETH_ADDR_ARGS(eh->eth_dst), ETH_ADDR_ARGS(eh->eth_src));
+    switch (*dhcp_hdr) {
+    case DHCPV6_MSG_TYPE_ADVT:
+        pinctrl_parse_dhcv6_advt(swconn, ip_flow, pkt_in, md, userdata);
+        break;
+    case DHCPV6_MSG_TYPE_REPLY:
+        break;
+    default:
+        break;
+    }
 }
 
 /* Called with in the pinctrl_handler thread context. */
@@ -2235,12 +2324,11 @@ send_ipv6_ras(struct rconn *swconn, long long int *send_ipv6_ra_time)
 }
 
 static void
-compose_prefixd_msg(struct dp_packet *b,
-                    const struct eth_addr eth_src,
-                    const struct eth_addr eth_dst,
-                    const struct in6_addr *ipv6_src,
-                    const struct in6_addr *ipv6_dst,
-                    unsigned char msg_type)
+compose_prefixd_solicit(struct dp_packet *b,
+                        const struct eth_addr eth_src,
+                        const struct eth_addr eth_dst,
+                        const struct in6_addr *ipv6_src,
+                        const struct in6_addr *ipv6_dst)
 {
     eth_compose(b, eth_dst, eth_src, ETH_TYPE_IPV6, IPV6_HEADER_LEN);
 
@@ -2254,7 +2342,7 @@ compose_prefixd_msg(struct dp_packet *b,
     packet_set_udp_port(b, htons(546), htons(547));
 
     unsigned char *dhcp_hdr = (unsigned char *)(udp_h + 1);
-    *dhcp_hdr = msg_type;
+    *dhcp_hdr = DHCPV6_MSG_TYPE_SOLICIT;
     /* XXX: transaction */
 
     struct dhcpv6_opt_server_id *opt_client_id =
@@ -2305,8 +2393,8 @@ ipv6_prefixd_send(struct rconn *swconn, struct ipv6_prefixd_state *pfd)
     ipv6_parse("ff02::1:2", &ipv6_dst);
 
     dp_packet_use_stub(&packet, packet_stub, sizeof packet_stub);
-    compose_prefixd_msg(&packet, pfd->ea, eth_dst, &pfd->ipv6_addr, &ipv6_dst,
-                        DHCPV6_MSG_TYPE_SOLICIT);
+    compose_prefixd_solicit(&packet, pfd->ea, eth_dst, &pfd->ipv6_addr,
+                            &ipv6_dst);
 
     uint64_t ofpacts_stub[4096 / 8];
     struct ofpbuf ofpacts = OFPBUF_STUB_INITIALIZER(ofpacts_stub);
@@ -2335,8 +2423,9 @@ ipv6_prefixd_send(struct rconn *swconn, struct ipv6_prefixd_state *pfd)
     queue_msg(swconn, ofputil_encode_packet_out(&po, proto));
     dp_packet_uninit(&packet);
     ofpbuf_uninit(&ofpacts);
+    pfd->next_announce = cur_time + IPV6_PREFIXD_TIMEOUT;
 
-    return cur_time + IPV6_PREFIXD_TIMEOUT;
+    return pfd->next_announce;
 }
 
 static void
@@ -2516,9 +2605,9 @@ prepare_ipv6_prefix_req(struct ovsdb_idl_index *sbrec_port_binding_by_datapath,
                 pfd->metadata = peer->datapath->tunnel_key;
                 pfd->port_key = peer->tunnel_key;
                 shash_add(&ipv6_prefixd, pb->logical_port, pfd);
+                pfd->next_announce = time_msec() + IPV6_PREFIXD_TIMEOUT;
                 changed = true;
             }
-            pfd->next_announce = time_msec() + IPV6_PREFIXD_TIMEOUT;
             pfd->delete_me = false;
         }
         sbrec_port_binding_index_destroy_row(target);
