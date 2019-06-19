@@ -84,7 +84,7 @@ struct ovn_extend_table;
     OVNACT(SET_METER,         ovnact_set_meter)       \
     OVNACT(OVNFIELD_LOAD,     ovnact_load)            \
     OVNACT(CHECK_PKT_LARGER,  ovnact_check_pkt_larger)\
-    OVNACT(DHCP_SERVER_PKT,  ovnact_nest)
+    OVNACT(DHCP6_SERVER_PKT,  ovnact_nest)
 
 /* enum ovnact_type, with a member OVNACT_<ENUM> for each action. */
 enum OVS_PACKED_ENUM ovnact_type {
@@ -488,11 +488,11 @@ enum action_opcode {
      */
     ACTION_OPCODE_ICMP4_ERROR,
 
-    /* dhcp_server_pkt { ...actions ...}."
+    /* dhcp6_server_pkt { ...actions ...}."
      *
      *  The actions, in OpenFlow 1.3 format, follow the action_header.
      */
-    ACTION_OPCODE_DHCP_SERVER,
+    ACTION_OPCODE_DHCP6_SERVER,
 };
 
 /* Header. */

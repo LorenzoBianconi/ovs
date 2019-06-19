@@ -5790,9 +5790,8 @@ build_lrouter_flows(struct hmap *datapaths, struct hmap *ports,
             ds_clear(&match);
             ds_put_format(&match, "inport == %s && ip6.dst == %s"
                           " && udp.src == 547 && udp.dst == 546",
-                          lrp_networks.ipv6_addrs[i].addr_s,
-                          op->json_key);
-            ds_put_format(&actions, "reg0 = 0; dhcp_server_pkt { "
+                          op->json_key, lrp_networks.ipv6_addrs[i].addr_s);
+            ds_put_format(&actions, "reg0 = 0; dhcp6_server_pkt { "
                           "eth.dst <-> eth.src; ip6.dst <-> ip6.src; "
                           "outport <-> inport; output; };");
             ovn_lflow_add(lflows, op->od, S_ROUTER_IN_IP_INPUT, 100,

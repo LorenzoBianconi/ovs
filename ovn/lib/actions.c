@@ -1828,24 +1828,23 @@ ovnact_put_opts_free(struct ovnact_put_opts *pdo)
 }
 
 static void
-parse_DHCP_SERVER_PKT(const struct ovnact_nest *on,
-                      const struct ovnact_encode_params *ep,
-                      struct ofpbuf *ofpacts)
+parse_DHCP6_SERVER_PKT(struct action_context *ctx)
 {
+    parse_nested_action(ctx, OVNACT_DHCP6_SERVER_PKT, "ip6");
 }
 
 static void
-format_DHCP_SERVER_PKT(const struct ovnact_nest *nest, struct ds *s)
+format_DHCP6_SERVER_PKT(const struct ovnact_nest *nest, struct ds *s)
 {
-    format_nested_action(nest, "dhcp_server_pkt", s);
+    format_nested_action(nest, "dhcp6_server_pkt", s);
 }
 
 static void
-encode_DHCP_SERVER_PKT(const struct ovnact_nest *on,
-                       const struct ovnact_encode_params *ep,
-                       struct ofpbuf *ofpacts)
+encode_DHCP6_SERVER_PKT(const struct ovnact_nest *on,
+                        const struct ovnact_encode_params *ep,
+                        struct ofpbuf *ofpacts)
 {
-    encode_nested_actions(on, ep, ACTION_OPCODE_DHCP_SERVER, ofpacts);
+    encode_nested_actions(on, ep, ACTION_OPCODE_DHCP6_SERVER, ofpacts);
 }
 
 static void
@@ -2535,6 +2534,8 @@ parse_action(struct action_context *ctx)
         parse_LOG(ctx);
     } else if (lexer_match_id(ctx->lexer, "set_meter")) {
         parse_set_meter_action(ctx);
+    } else if (lexer_match_id(ctx->lexer, "dhcp6_server_pkt")) {
+        parse_DHCP6_SERVER_PKT(ctx);
     } else {
         lexer_syntax_error(ctx->lexer, "expecting action");
     }

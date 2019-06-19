@@ -751,9 +751,9 @@ pinctrl_handle_tcp_reset(struct rconn *swconn, const struct flow *ip_flow,
 }
 
 static void
-pinctrl_handle_dhcp_server(struct rconn *swconn, const struct flow *ip_flow,
-                           struct dp_packet *pkt_in, const struct match *md,
-                           struct ofpbuf *userdata)
+pinctrl_handle_dhcp6_server(struct rconn *swconn, const struct flow *ip_flow,
+                            struct dp_packet *pkt_in, const struct match *md,
+                            struct ofpbuf *userdata)
 {
     uint64_t packet_stub[256 / 8];
     struct dp_packet packet;
@@ -1780,9 +1780,9 @@ process_packet_in(struct rconn *swconn, const struct ofp_header *msg)
                                           &pin, &userdata, &continuation);
         break;
 
-    case ACTION_OPCODE_DHCP_SERVER:
-        pinctrl_handle_dhcp_server(swconn, &headers, &packet,
-                                   &pin.flow_metadata, &userdata);
+    case ACTION_OPCODE_DHCP6_SERVER:
+        pinctrl_handle_dhcp6_server(swconn, &headers, &packet,
+                                    &pin.flow_metadata, &userdata);
         break;
 
     default:
