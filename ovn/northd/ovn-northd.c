@@ -70,8 +70,6 @@ static const char *unixctl_path;
 static struct hmap macam = HMAP_INITIALIZER(&macam);
 static struct eth_addr mac_prefix;
 
-static bool prefix_delegation;
-
 #define MAX_OVN_TAGS 4096
 
 /* Pipeline stages. */
@@ -4628,8 +4626,7 @@ build_lswitch_flows(struct hmap *datapaths, struct hmap *ports,
             continue;
         }
 
-        if (!op->nbsp->dhcpv4_options && !op->nbsp->dhcpv6_options &&
-            !prefix_delegation) {
+        if (!op->nbsp->dhcpv4_options && !op->nbsp->dhcpv6_options) {
             /* CMS has disabled both native DHCPv4, DHCPv6 and preflix
              * delegation for this lport.
              */
@@ -6904,6 +6901,19 @@ build_lrouter_flows(struct hmap *datapaths, struct hmap *ports,
             continue;
         }
 
+        /* enable IPv6 prefix delegation */
+        bool prefix_delegation = smap_get_bool(&op->nbrp->options,
+                                               "prefix_delegation", false);
+        if (prefix_delegation) {
+            struct smap options;
+
+            smap_clone(&options, &op->sb->options);
+            smap_add(&options, "ipv6_prefix_delegation", "true");
+
+            sbrec_port_binding_set_options(op->sb, &options);
+            smap_destroy(&options);
+        }
+
         const char *address_mode = smap_get(
             &op->nbrp->ipv6_ra_configs, "address_mode");
 
@@ -6923,20 +6933,6 @@ build_lrouter_flows(struct hmap *datapaths, struct hmap *ports,
                           false)) {
             copy_ra_to_sb(op, address_mode);
         }
-
-        /* enable IPv6 prefix delegation */
-        prefix_delegation = smap_get_bool(&op->nbrp->options,
-                                          "prefix_delegation", false);
-        if (prefix_delegation) {
-            struct smap options;
-
-            smap_clone(&options, &op->sb->options);
-            smap_add(&options, "ipv6_prefix_delegation", "true");
-
-            sbrec_port_binding_set_options(op->sb, &options);
-            smap_destroy(&options);
-        }
-
 
         ds_clear(&match);
         ds_put_format(&match, "inport == %s && ip6.dst == ff02::2 && nd_rs",
