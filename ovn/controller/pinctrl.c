@@ -329,13 +329,19 @@ set_actions_and_enqueue_msg(struct rconn *swconn,
 
 static struct shash ipv6_prefixd;
 
+enum {
+    PREFIX_SOLICIT,
+    PREFIX_PENDING,
+    PREFIX_DONE,
+};
+
 struct ipv6_prefixd_state {
     long long int next_announce;
     struct in6_addr ipv6_addr;
     struct eth_addr ea;
     int64_t port_key;
     int64_t metadata;
-    bool delete_me;
+    int state;
 };
 
 static void
@@ -888,14 +894,14 @@ pinctrl_find_prefixd_state(const struct flow *ip_flow)
 }
 
 static void pinctrl_prefixd_state_handler(const struct flow *ip_flow,
-                                          struct lport_addresses *addr,
+                                          struct in6_addr *addr,
                                           char prefix_len)
 {
     struct ipv6_prefixd_state *pfd;
 
     pfd = pinctrl_find_prefixd_state(ip_flow);
     if (pfd) {
-        ;
+        pfd->state = PREFIX_DONE;
     }
 }
 
@@ -920,17 +926,13 @@ pinctrl_parse_dhcv6_reply(struct dp_packet *pkt_in,
             in_opt = (struct dhcpv6_opt_header *)(in_dhcpv6_data + size);
             while (size < opt_len) {
                 if (ntohs(in_opt->code) == DHCPV6_OPT_IA_PREFIX) {
-                    const char *addr, *prefix_len;
-                    struct lport_addresses ip_addrs;
+                    const char *prefix_len;
+                    struct in6_addr ipv6;
 
                     prefix_len = (const char *)in_dhcpv6_data + size +
                                   sizeof *in_opt + 8;
-                    addr = prefix_len + 1;
-                    if (!extract_ip_addresses(addr, &ip_addrs)) {
-                        return;
-                    }
-                    pinctrl_prefixd_state_handler(ip_flow, &ip_addrs,
-                                                  *prefix_len);
+                    memcpy(&ipv6, prefix_len + 1, sizeof (struct in6_addr));
+                    pinctrl_prefixd_state_handler(ip_flow, &ipv6, *prefix_len);
                 }
                 size += sizeof *in_opt + ntohs(in_opt->len);
                 in_opt = (struct dhcpv6_opt_header *)(in_dhcpv6_data + size);
@@ -2503,10 +2505,23 @@ ipv6_prefixd_send(struct rconn *swconn, struct ipv6_prefixd_state *pfd)
     return pfd->next_announce;
 }
 
+static bool ipv6_prefixd_should_inject(void)
+{
+    struct shash_node *iter;
+
+    SHASH_FOR_EACH (iter, &ipv6_prefixd) {
+        struct ipv6_prefixd_state *pfd = iter->data;
+        if (pfd->state == PREFIX_SOLICIT) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void
 ipv6_prefixd_wait(long long int timeout)
 {
-    if (!shash_is_empty(&ipv6_prefixd)) {
+    if (ipv6_prefixd_should_inject()) {
         poll_timer_wait_until(timeout);
     }
 }
@@ -2626,16 +2641,10 @@ prepare_ipv6_prefix_req(struct ovsdb_idl_index *sbrec_port_binding_by_datapath,
                         const struct hmap *local_datapaths)
     OVS_REQUIRES(pinctrl_mutex)
 {
-    struct shash_node *iter, *iter_next;
     const struct local_datapath *ld;
     struct ipv6_prefixd_state *pfd;
     bool changed = false;
     int i;
-
-    SHASH_FOR_EACH (iter, &ipv6_prefixd) {
-        pfd = iter->data;
-        pfd->delete_me = true;
-    }
 
     HMAP_FOR_EACH (ld, hmap_node, local_datapaths) {
         struct sbrec_port_binding *target = sbrec_port_binding_index_init_row(
@@ -2683,16 +2692,8 @@ prepare_ipv6_prefix_req(struct ovsdb_idl_index *sbrec_port_binding_by_datapath,
                 pfd->next_announce = time_msec() + IPV6_PREFIXD_TIMEOUT;
                 changed = true;
             }
-            pfd->delete_me = false;
         }
         sbrec_port_binding_index_destroy_row(target);
-    }
-    SHASH_FOR_EACH_SAFE (iter, iter_next, &ipv6_prefixd) {
-        pfd = iter->data;
-        if (pfd->delete_me) {
-            shash_delete(&ipv6_prefixd, iter);
-            ipv6_prefixd_delete(pfd);
-        }
     }
 
     if (changed) {
@@ -3509,7 +3510,7 @@ static bool
 may_inject_pkts(void)
 {
     return (!shash_is_empty(&ipv6_ras) ||
-            !shash_is_empty(&ipv6_prefixd) ||
+            ipv6_prefixd_should_inject() ||
             !shash_is_empty(&send_garp_data) ||
             !ovs_list_is_empty(&buffered_mac_bindings));
 }
