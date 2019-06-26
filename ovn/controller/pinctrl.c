@@ -327,6 +327,43 @@ set_actions_and_enqueue_msg(struct rconn *swconn,
     ofpbuf_uninit(&ofpacts);
 }
 
+static struct shash ipv6_prefixd;
+
+struct ipv6_prefixd_state {
+    long long int next_announce;
+    struct in6_addr ipv6_addr;
+    struct eth_addr ea;
+    int64_t port_key;
+    int64_t metadata;
+    bool delete_me;
+};
+
+static void
+init_ipv6_prefixd(void)
+{
+    shash_init(&ipv6_prefixd);
+}
+
+static void
+ipv6_prefixd_delete(struct ipv6_prefixd_state *pfd)
+{
+    if (pfd) {
+        free(pfd);
+    }
+}
+
+static void
+destroy_ipv6_prefixd(void)
+{
+    struct shash_node *iter, *next;
+    SHASH_FOR_EACH_SAFE (iter, next, &ipv6_prefixd) {
+        struct ipv6_prefixd_state *pfd = iter->data;
+        ipv6_prefixd_delete(pfd);
+        shash_delete(&ipv6_prefixd, iter);
+    }
+    shash_destroy(&ipv6_prefixd);
+}
+
 struct buffer_info {
     struct ofpbuf ofpacts;
     struct dp_packet *p;
@@ -835,10 +872,37 @@ pinctrl_parse_dhcv6_advt(struct rconn *swconn, const struct flow *ip_flow,
     dp_packet_uninit(&packet);
 }
 
+static struct ipv6_prefixd_state *
+pinctrl_find_prefixd_state(const struct flow *ip_flow)
+{
+    struct shash_node *iter;
+
+    SHASH_FOR_EACH (iter, &ipv6_prefixd) {
+        struct ipv6_prefixd_state *pfd = iter->data;
+        if (IN6_ARE_ADDR_EQUAL(&pfd->ipv6_addr, &ip_flow->ipv6_dst) &&
+            eth_addr_equals(pfd->ea, ip_flow->dl_dst)) {
+            return pfd;
+        }
+    }
+    return NULL;
+}
+
+static void pinctrl_prefixd_state_handler(const struct flow *ip_flow,
+                                          struct lport_addresses *addr,
+                                          char prefix_len)
+{
+    struct ipv6_prefixd_state *pfd;
+
+    pfd = pinctrl_find_prefixd_state(ip_flow);
+    if (pfd) {
+        ;
+    }
+}
+
 static void
-pinctrl_parse_dhcv6_reply(struct rconn *swconn, const struct flow *ip_flow,
-                          struct dp_packet *pkt_in, const struct match *md,
-                          struct ofpbuf *userdata)
+pinctrl_parse_dhcv6_reply(struct dp_packet *pkt_in,
+                          const struct flow *ip_flow)
+    OVS_REQUIRES(pinctrl_mutex)
 {
     struct udp_header *udp_in = dp_packet_l4(pkt_in);
     size_t dlen = MIN(ntohs(udp_in->udp_len), dp_packet_l4_size(pkt_in));
@@ -856,7 +920,17 @@ pinctrl_parse_dhcv6_reply(struct rconn *swconn, const struct flow *ip_flow,
             in_opt = (struct dhcpv6_opt_header *)(in_dhcpv6_data + size);
             while (size < opt_len) {
                 if (ntohs(in_opt->code) == DHCPV6_OPT_IA_PREFIX) {
-                    ;
+                    const char *addr, *prefix_len;
+                    struct lport_addresses ip_addrs;
+
+                    prefix_len = (const char *)in_dhcpv6_data + size +
+                                  sizeof *in_opt + 8;
+                    addr = prefix_len + 1;
+                    if (!extract_ip_addresses(addr, &ip_addrs)) {
+                        return;
+                    }
+                    pinctrl_prefixd_state_handler(ip_flow, &ip_addrs,
+                                                  *prefix_len);
                 }
                 size += sizeof *in_opt + ntohs(in_opt->len);
                 in_opt = (struct dhcpv6_opt_header *)(in_dhcpv6_data + size);
@@ -888,7 +962,9 @@ pinctrl_handle_dhcp6_server(struct rconn *swconn, const struct flow *ip_flow,
         pinctrl_parse_dhcv6_advt(swconn, ip_flow, pkt_in, md, userdata);
         break;
     case DHCPV6_MSG_TYPE_REPLY:
-        pinctrl_parse_dhcv6_reply(swconn, ip_flow, pkt_in, md, userdata);
+        ovs_mutex_lock(&pinctrl_mutex);
+        pinctrl_parse_dhcv6_reply(pkt_in, ip_flow);
+        ovs_mutex_unlock(&pinctrl_mutex);
         break;
     default:
         break;
@@ -2092,43 +2168,6 @@ pinctrl_run(struct ovsdb_idl_txn *ovnsb_idl_txn,
                          sbrec_mac_binding_by_lport_ip,
                          local_datapaths);
     ovs_mutex_unlock(&pinctrl_mutex);
-}
-
-static struct shash ipv6_prefixd;
-
-struct ipv6_prefixd_state {
-    long long int next_announce;
-    struct in6_addr ipv6_addr;
-    struct eth_addr ea;
-    int64_t port_key;
-    int64_t metadata;
-    bool delete_me;
-};
-
-static void
-init_ipv6_prefixd(void)
-{
-    shash_init(&ipv6_prefixd);
-}
-
-static void
-ipv6_prefixd_delete(struct ipv6_prefixd_state *pfd)
-{
-    if (pfd) {
-        free(pfd);
-    }
-}
-
-static void
-destroy_ipv6_prefixd(void)
-{
-    struct shash_node *iter, *next;
-    SHASH_FOR_EACH_SAFE (iter, next, &ipv6_prefixd) {
-        struct ipv6_prefixd_state *pfd = iter->data;
-        ipv6_prefixd_delete(pfd);
-        shash_delete(&ipv6_prefixd, iter);
-    }
-    shash_destroy(&ipv6_prefixd);
 }
 
 /* Table of ipv6_ra_state structures, keyed on logical port name.
