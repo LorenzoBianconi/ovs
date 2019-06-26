@@ -829,7 +829,7 @@ pinctrl_parse_dhcv6_advt(struct rconn *swconn, const struct flow *ip_flow,
                 if (ntohs(in_opt->code) == DHCPV6_OPT_STATUS_CODE) {
                    struct dhcpv6_opt_status *status;
 
-                   status = (struct dhcpv6_opt_status *)(in_opt + 1);
+                   status = (struct dhcpv6_opt_status *)in_opt;
                    if (ntohs(status->status_code)) {
                        return;
                    }
@@ -946,7 +946,7 @@ pinctrl_parse_dhcv6_reply(struct dp_packet *pkt_in,
                 if (ntohs(in_opt->code) == DHCPV6_OPT_STATUS_CODE) {
                    struct dhcpv6_opt_status *status_hdr;
 
-                   status_hdr = (struct dhcpv6_opt_status *)(in_opt + 1);
+                   status_hdr = (struct dhcpv6_opt_status *)in_opt;
                    status = ntohs(status_hdr->status_code) == 0;
                 }
                 size += sizeof *in_opt + ntohs(in_opt->len);
