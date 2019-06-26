@@ -826,6 +826,14 @@ pinctrl_parse_dhcv6_advt(struct rconn *swconn, const struct flow *ip_flow,
                     hdr_len += flen;
                     len += flen;
                 }
+                if (ntohs(in_opt->code) == DHCPV6_OPT_STATUS_CODE) {
+                   struct dhcpv6_opt_status *status;
+
+                   status = (struct dhcpv6_opt_status *)(in_opt + 1);
+                   if (ntohs(status->status_code)) {
+                       return;
+                   }
+                }
                 size += flen;
                 in_opt = (struct dhcpv6_opt_header *)(in_dhcpv6_data + size);
             }
@@ -913,6 +921,9 @@ pinctrl_parse_dhcv6_reply(struct dp_packet *pkt_in,
     struct udp_header *udp_in = dp_packet_l4(pkt_in);
     size_t dlen = MIN(ntohs(udp_in->udp_len), dp_packet_l4_size(pkt_in));
     uint8_t *end = (uint8_t *)udp_in + dlen;
+    struct in6_addr ipv6;
+    bool status = false;
+    uint8_t prefix_len;
 
     unsigned char *in_dhcpv6_data = (unsigned char *)(udp_in + 1);
     in_dhcpv6_data += 4;
@@ -926,13 +937,17 @@ pinctrl_parse_dhcv6_reply(struct dp_packet *pkt_in,
             in_opt = (struct dhcpv6_opt_header *)(in_dhcpv6_data + size);
             while (size < opt_len) {
                 if (ntohs(in_opt->code) == DHCPV6_OPT_IA_PREFIX) {
-                    const char *prefix_len;
-                    struct in6_addr ipv6;
+                    uint8_t *data;
 
-                    prefix_len = (const char *)in_dhcpv6_data + size +
-                                  sizeof *in_opt + 8;
-                    memcpy(&ipv6, prefix_len + 1, sizeof (struct in6_addr));
-                    pinctrl_prefixd_state_handler(ip_flow, &ipv6, *prefix_len);
+                    data = in_dhcpv6_data + size + sizeof *in_opt + 8;
+                    prefix_len = *data;
+                    memcpy(&ipv6, data + 1, sizeof (struct in6_addr));
+                }
+                if (ntohs(in_opt->code) == DHCPV6_OPT_STATUS_CODE) {
+                   struct dhcpv6_opt_status *status_hdr;
+
+                   status_hdr = (struct dhcpv6_opt_status *)(in_opt + 1);
+                   status = ntohs(status_hdr->status_code) == 0;
                 }
                 size += sizeof *in_opt + ntohs(in_opt->len);
                 in_opt = (struct dhcpv6_opt_header *)(in_dhcpv6_data + size);
@@ -943,6 +958,9 @@ pinctrl_parse_dhcv6_reply(struct dp_packet *pkt_in,
             break;
         }
         in_dhcpv6_data += opt_len;
+    }
+    if (status) {
+        pinctrl_prefixd_state_handler(ip_flow, &ipv6, prefix_len);
     }
 }
 
