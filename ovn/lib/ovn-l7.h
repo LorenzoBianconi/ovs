@@ -223,6 +223,15 @@ struct dhcpv6_opt_ia_na {
 });
 
 OVS_PACKED(
+struct dhcpv6_opt_ia_prefix {
+    struct dhcpv6_opt_header opt;
+    ovs_be32 plife_time;
+    ovs_be32 vlife_time;
+    uint8_t plen;
+    struct in6_addr ipv6;
+});
+
+OVS_PACKED(
 struct dhcpv6_opt_status {
     struct dhcpv6_opt_header opt;
     ovs_be16 status_code;
