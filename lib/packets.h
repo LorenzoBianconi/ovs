@@ -1591,6 +1591,10 @@ void compose_nd_ra(struct dp_packet *,
                    uint8_t cur_hop_limit, uint8_t mo_flags,
                    ovs_be16 router_lt, ovs_be32 reachable_time,
                    ovs_be32 retrans_timer, uint32_t mtu);
+void *
+compose_ipv6(struct dp_packet *packet, uint8_t proto,
+             const struct in6_addr *src, const struct in6_addr *dst,
+             uint8_t key_tc, ovs_be32 key_fl, uint8_t key_hl, int size);
 void packet_put_ra_prefix_opt(struct dp_packet *,
                               uint8_t plen, uint8_t la_flags,
                               ovs_be32 valid_lifetime,
