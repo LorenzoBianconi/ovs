@@ -1412,6 +1412,12 @@ bind_vport("xyzzy",;
 bind_vport("xyzzy", inport;
     Syntax error at `;' expecting `)'.
 
+# prefix delegation
+handle_dhcpv6_reply{};
+    formats as handle_dhcpv6_reply { drop; };
+    encodes as controller(userdata=00.00.00.12.00.00.00.00)
+    has prereqs ip6
+
 # Miscellaneous negative tests.
 ;
     Syntax error at `;'.

@@ -2017,6 +2017,26 @@ ovnact_put_opts_free(struct ovnact_put_opts *pdo)
 }
 
 static void
+parse_DHCP6_REPLY(struct action_context *ctx)
+{
+    parse_nested_action(ctx, OVNACT_DHCP6_REPLY, "ip6");
+}
+
+static void
+format_DHCP6_REPLY(const struct ovnact_nest *nest, struct ds *s)
+{
+    format_nested_action(nest, "handle_dhcpv6_reply", s);
+}
+
+static void
+encode_DHCP6_REPLY(const struct ovnact_nest *on,
+                   const struct ovnact_encode_params *ep,
+                   struct ofpbuf *ofpacts)
+{
+    encode_nested_actions(on, ep, ACTION_OPCODE_DHCP6_SERVER, ofpacts);
+}
+
+static void
 parse_SET_QUEUE(struct action_context *ctx)
 {
     int queue_id;
@@ -2767,6 +2787,8 @@ parse_action(struct action_context *ctx)
         parse_trigger_event(ctx, ovnact_put_TRIGGER_EVENT(ctx->ovnacts));
     } else if (lexer_match_id(ctx->lexer, "bind_vport")) {
         parse_bind_vport(ctx);
+    } else if (lexer_match_id(ctx->lexer, "handle_dhcpv6_reply")) {
+        parse_DHCP6_REPLY(ctx);
     } else {
         lexer_syntax_error(ctx->lexer, "expecting action");
     }
