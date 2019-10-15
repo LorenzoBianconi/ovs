@@ -1000,6 +1000,18 @@ struct ovs_nd_prefix_opt {
 };
 BUILD_ASSERT_DECL(ND_PREFIX_OPT_LEN == sizeof(struct ovs_nd_prefix_opt));
 
+/* Neighbor Discovery option: RDNSS. */
+#define ND_RDNSS_OPT_LEN    8
+#define ND_OPT_RDNSS        25
+struct ovs_nd_rdnss_opt {
+    uint8_t type;         /* ND_OPT_RDNSS. */
+    uint8_t len;          /* >= 3. */
+    ovs_be16 reserved;    /* Always 0. */
+    ovs_be32 lifetime;
+    const ovs_be128 dns[0];
+};
+BUILD_ASSERT_DECL(ND_RDNSS_OPT_LEN == sizeof(struct ovs_nd_rdnss_opt));
+
 /* Neighbor Discovery option: MTU. */
 #define ND_MTU_OPT_LEN 8
 #define ND_MTU_DEFAULT 0
@@ -1600,6 +1612,9 @@ void packet_put_ra_prefix_opt(struct dp_packet *,
                               ovs_be32 valid_lifetime,
                               ovs_be32 preferred_lifetime,
                               const ovs_be128 router_prefix);
+void
+packet_put_ra_rdnss_opt(struct dp_packet *b, uint8_t num,
+                        ovs_be32 lifetime, const struct in6_addr *dns);
 uint32_t packet_csum_pseudoheader(const struct ip_header *);
 void IP_ECN_set_ce(struct dp_packet *pkt, bool is_ipv6);
 

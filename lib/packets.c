@@ -1726,6 +1726,35 @@ packet_csum_pseudoheader(const struct ip_header *ip)
     return partial;
 }
 
+void
+packet_put_ra_rdnss_opt(struct dp_packet *b, uint8_t num,
+                        ovs_be32 lifetime, const struct in6_addr *dns)
+{
+    size_t prev_l4_size = dp_packet_l4_size(b);
+    struct ip6_hdr *nh = dp_packet_l3(b);
+    size_t len = 2 * num + 1;
+    size_t size = len * 8;
+
+    nh->ip6_plen = htons(prev_l4_size + len * 8);
+
+    struct ovs_nd_rdnss_opt *nd_rdnss = dp_packet_put_uninit(b, size);
+    nd_rdnss->type = ND_OPT_RDNSS;
+    nd_rdnss->len = len;
+    nd_rdnss->reserved = 0;
+    nd_rdnss->lifetime = lifetime;
+
+    ovs_be128 *addr = (ovs_be128 *)(nd_rdnss + 1);
+    for (int i = 0; i < num; i++) {
+        memcpy(addr + i, dns, sizeof(ovs_be32[4]));
+    }
+
+    struct ovs_ra_msg *ra = dp_packet_l4(b);
+    ra->icmph.icmp6_cksum = 0;
+    uint32_t icmp_csum = packet_csum_pseudoheader6(dp_packet_l3(b));
+    ra->icmph.icmp6_cksum = csum_finish(csum_continue(icmp_csum, ra,
+                                                      prev_l4_size + size));
+}
+
 #ifndef __CHECKER__
 uint32_t
 packet_csum_pseudoheader6(const struct ovs_16aligned_ip6_hdr *ip6)
