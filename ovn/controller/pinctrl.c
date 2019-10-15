@@ -2196,6 +2196,8 @@ struct ipv6_ra_config {
     uint8_t mo_flags; /* Managed/Other flags for RAs */
     uint8_t la_flags; /* On-link/autonomous flags for address prefixes */
     struct lport_addresses prefixes;
+    struct in6_addr rdnss;
+    bool has_rdnss;
 };
 
 struct ipv6_ra_state {
@@ -2293,6 +2295,12 @@ ipv6_ra_update_config(const struct sbrec_port_binding *pb)
         VLOG_WARN("Invalid IP source %s", ip_addr);
         goto fail;
     }
+    const char *rdnss = smap_get(&pb->options, "ipv6_ra_rdnss");
+    if (rdnss && !ipv6_parse(rdnss, &config->rdnss)) {
+        VLOG_WARN("Invalid RDNSS source %s", rdnss);
+        goto fail;
+    }
+    config->has_rdnss = !!rdnss;
 
     return config;
 
@@ -2346,6 +2354,9 @@ ipv6_ra_send(struct rconn *swconn, struct ipv6_ra_state *ra)
             ra->config->prefixes.ipv6_addrs[i].plen,
             ra->config->la_flags, htonl(IPV6_ND_RA_OPT_PREFIX_VALID_LIFETIME),
             htonl(IPV6_ND_RA_OPT_PREFIX_PREFERRED_LIFETIME), addr);
+    }
+    if (ra->config->has_rdnss) {
+        packet_put_ra_rdnss_opt(&packet, 1, 0xffffffff, &ra->config->rdnss);
     }
 
     uint64_t ofpacts_stub[4096 / 8];
