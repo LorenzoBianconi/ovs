@@ -2198,6 +2198,7 @@ struct ipv6_ra_config {
     struct lport_addresses prefixes;
     struct in6_addr rdnss;
     bool has_rdnss;
+    struct ds dnssl;
 };
 
 struct ipv6_ra_state {
@@ -2219,6 +2220,7 @@ ipv6_ra_config_delete(struct ipv6_ra_config *config)
 {
     if (config) {
         destroy_lport_addresses(&config->prefixes);
+        ds_destroy(&config->dnssl);
         free(config);
     }
 }
@@ -2257,6 +2259,7 @@ ipv6_ra_update_config(const struct sbrec_port_binding *pb)
             nd_ra_min_interval_default(config->max_interval));
     config->mtu = smap_get_int(&pb->options, "ipv6_ra_mtu", ND_MTU_DEFAULT);
     config->la_flags = IPV6_ND_RA_OPT_PREFIX_ON_LINK;
+    ds_init(&config->dnssl);
 
     const char *address_mode = smap_get(&pb->options, "ipv6_ra_address_mode");
     if (!address_mode) {
@@ -2302,6 +2305,11 @@ ipv6_ra_update_config(const struct sbrec_port_binding *pb)
     }
     config->has_rdnss = !!rdnss;
 
+    const char *dnssl = smap_get(&pb->options, "ipv6_ra_dnssl");
+    if (dnssl) {
+        ds_put_buffer(&config->dnssl, dnssl, strlen(dnssl));
+    }
+
     return config;
 
 fail:
@@ -2339,7 +2347,7 @@ ipv6_ra_send(struct rconn *swconn, struct ipv6_ra_state *ra)
         return ra->next_announce;
     }
 
-    uint64_t packet_stub[128 / 8];
+    uint64_t packet_stub[512 / 8];
     struct dp_packet packet;
     dp_packet_use_stub(&packet, packet_stub, sizeof packet_stub);
     compose_nd_ra(&packet, ra->config->eth_src, ra->config->eth_dst,
@@ -2357,6 +2365,9 @@ ipv6_ra_send(struct rconn *swconn, struct ipv6_ra_state *ra)
     }
     if (ra->config->has_rdnss) {
         packet_put_ra_rdnss_opt(&packet, 1, 0xffffffff, &ra->config->rdnss);
+    }
+    if (ra->config->dnssl.length) {
+        packet_put_ra_dnssl_opt(&packet, 0xffffffff, ra->config->dnssl.string);
     }
 
     uint64_t ofpacts_stub[4096 / 8];
