@@ -1005,6 +1005,18 @@ struct ovs_nd_rdnss_opt {
 };
 BUILD_ASSERT_DECL(ND_RDNSS_OPT_LEN == sizeof(struct ovs_nd_rdnss_opt));
 
+/* DNSSL option RFC 6106 */
+#define ND_OPT_DNSSL        31
+#define ND_DNSSL_OPT_LEN    8
+struct ovs_nd_dnssl {
+    u_int8_t type;  /* ND_OPT_DNSSL */
+    u_int8_t len;   /* >= 2 */
+    ovs_be16 reserved;
+    ovs_be32 lifetime;
+    char dnssl[0];
+};
+BUILD_ASSERT_DECL(ND_DNSSL_OPT_LEN == sizeof(struct ovs_nd_dnssl));
+
 /* Neighbor Discovery option: MTU. */
 #define ND_MTU_OPT_LEN 8
 #define ND_MTU_DEFAULT 0
@@ -1604,6 +1616,9 @@ void packet_put_ra_prefix_opt(struct dp_packet *,
 void
 packet_put_ra_rdnss_opt(struct dp_packet *b, uint8_t num,
                         ovs_be32 lifetime, const struct in6_addr *dns);
+void
+packet_put_ra_dnssl_opt(struct dp_packet *b, ovs_be32 lifetime,
+                        char *dnssl_list);
 uint32_t packet_csum_pseudoheader(const struct ip_header *);
 void IP_ECN_set_ce(struct dp_packet *pkt, bool is_ipv6);
 

@@ -1751,6 +1751,42 @@ packet_put_ra_rdnss_opt(struct dp_packet *b, uint8_t num,
                                                       prev_l4_size + size));
 }
 
+void
+packet_put_ra_dnssl_opt(struct dp_packet *b, ovs_be32 lifetime,
+                        char *dnssl_list)
+{
+    size_t prev_l4_size = dp_packet_l4_size(b);
+    char *t0, *r0 = dnssl_list, dnssl[255];
+    struct ip6_hdr *nh = dp_packet_l3(b);
+    size_t size = 8;
+    int i = 0;
+
+    while ((t0 = strtok_r(r0, ",", &r0))) {
+        char *t1, *r1 = t0;
+
+        while ((t1 = strtok_r(r1, ".", &r1))) {
+            dnssl[i++] = strlen(t1);
+            memcpy(&dnssl[i], t1, strlen(t1));
+            i += strlen(t1);
+        }
+        dnssl[i++] = 0;
+        size += strlen(t0) + 1;
+    }
+    nh->ip6_plen = htons(prev_l4_size + size);
+
+    struct ovs_nd_dnssl *nd_dnssl = dp_packet_put_uninit(b, size);
+    nd_dnssl->type = ND_OPT_DNSSL;
+    nd_dnssl->len = size / 8;
+    nd_dnssl->reserved = 0;
+    nd_dnssl->lifetime = lifetime;
+
+    struct ovs_ra_msg *ra = dp_packet_l4(b);
+    ra->icmph.icmp6_cksum = 0;
+    uint32_t icmp_csum = packet_csum_pseudoheader6(dp_packet_l3(b));
+    ra->icmph.icmp6_cksum = csum_finish(csum_continue(icmp_csum, ra,
+                                                      prev_l4_size + size));
+}
+
 #ifndef __CHECKER__
 uint32_t
 packet_csum_pseudoheader6(const struct ovs_16aligned_ip6_hdr *ip6)
