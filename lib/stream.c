@@ -208,7 +208,8 @@ stream_verify_name(const char *name)
  * stores a pointer to the new connection in '*streamp', otherwise a null
  * pointer.  */
 int
-stream_open(const char *name, struct stream **streamp, uint8_t dscp)
+stream_open(const char *name, struct stream **streamp, uint8_t dscp,
+            int bufsize)
 {
     const struct stream_class *class;
     struct stream *stream;
@@ -225,7 +226,7 @@ stream_open(const char *name, struct stream **streamp, uint8_t dscp)
 
     /* Call class's "open" function. */
     suffix_copy = xstrdup(strchr(name, ':') + 1);
-    error = class->open(name, suffix_copy, &stream, dscp);
+    error = class->open(name, suffix_copy, &stream, dscp, bufsize);
     free(suffix_copy);
     if (error) {
         goto error;
@@ -650,7 +651,7 @@ pstream_get_bound_port(const struct pstream *pstream)
  * Takes ownership of 'name'. */
 void
 stream_init(struct stream *stream, const struct stream_class *class,
-            int connect_status, char *name)
+            int connect_status, char *name, int bufsize)
 {
     memset(stream, 0, sizeof *stream);
     stream->class = class;
@@ -659,6 +660,7 @@ stream_init(struct stream *stream, const struct stream_class *class,
                     : SCS_DISCONNECTED);
     stream->error = connect_status;
     stream->name = name;
+    stream->bufsize = bufsize;
     ovs_assert(stream->state != SCS_CONNECTING || class->connect);
 }
 
@@ -701,7 +703,7 @@ int
 stream_open_with_default_port(const char *name_,
                               uint16_t default_port,
                               struct stream **streamp,
-                              uint8_t dscp)
+                              uint8_t dscp, int bufsize)
 {
     char *name;
     int error;
@@ -721,7 +723,7 @@ stream_open_with_default_port(const char *name_,
     } else {
         name = xstrdup(name_);
     }
-    error = stream_open(name, streamp, dscp);
+    error = stream_open(name, streamp, dscp, bufsize);
     free(name);
 
     return error;

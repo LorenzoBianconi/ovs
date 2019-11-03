@@ -253,6 +253,7 @@ struct ovsdb_idl {
      * state machine must restart.  */
     struct jsonrpc_session *session; /* Connection to the server. */
     char *remote;                    /* 'session' remote name. */
+    int bufsize;
     enum ovsdb_idl_state state;      /* Current session state. */
     unsigned int state_seqno;        /* See above. */
     struct json *request_id;         /* JSON ID for request awaiting reply. */
@@ -455,7 +456,7 @@ ovsdb_idl_create(const char *remote, const struct ovsdb_idl_class *class,
 {
     struct ovsdb_idl *idl = ovsdb_idl_create_unconnected(
         class, monitor_everything_by_default);
-    ovsdb_idl_set_remote(idl, remote, retry);
+    ovsdb_idl_set_remote(idl, remote, retry, 512);
     return idl;
 }
 
@@ -511,11 +512,13 @@ ovsdb_idl_create_unconnected(const struct ovsdb_idl_class *class,
  * If 'retry' is true, the connection to the remote will automatically retry
  * when it fails.  If 'retry' is false, the connection is one-time. */
 void
-ovsdb_idl_set_remote(struct ovsdb_idl *idl, const char *remote, bool retry)
+ovsdb_idl_set_remote(struct ovsdb_idl *idl, const char *remote, bool retry,
+                     int bufsize)
 {
     if (idl
         && ((remote != NULL) != (idl->remote != NULL)
-            || (remote && idl->remote && strcmp(remote, idl->remote)))) {
+            || (remote && idl->remote && strcmp(remote, idl->remote))
+            || bufsize != idl->bufsize)) {
         ovs_assert(!idl->data.txn);
 
         /* Close the old session, if any. */
@@ -534,8 +537,9 @@ ovsdb_idl_set_remote(struct ovsdb_idl *idl, const char *remote, bool retry)
             if (idl->shuffle_remotes) {
                 svec_shuffle(&remotes);
             }
-            idl->session = jsonrpc_session_open_multiple(&remotes, retry);
+            idl->session = jsonrpc_session_open_multiple(&remotes, retry, bufsize);
             svec_destroy(&remotes);
+            idl->bufsize = bufsize;
 
             idl->state_seqno = UINT_MAX;
 

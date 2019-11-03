@@ -233,7 +233,7 @@ want_to_poll_events(int want)
  * ownership of 'server_name'. */
 static int
 new_ssl_stream(char *name, char *server_name, int fd, enum session_type type,
-               enum ssl_state state, struct stream **streamp)
+               enum ssl_state state, struct stream **streamp, int bufsize)
 {
     struct ssl_stream *sslv;
     SSL *ssl = NULL;
@@ -295,7 +295,7 @@ new_ssl_stream(char *name, char *server_name, int fd, enum session_type type,
 
     /* Create and return the ssl_stream. */
     sslv = xmalloc(sizeof *sslv);
-    stream_init(&sslv->stream, &ssl_stream_class, EAGAIN, name);
+    stream_init(&sslv->stream, &ssl_stream_class, EAGAIN, name, bufsize);
     sslv->state = state;
     sslv->type = type;
     sslv->fd = fd;
@@ -356,7 +356,8 @@ get_server_name(const char *suffix_)
 }
 
 static int
-ssl_open(const char *name, char *suffix, struct stream **streamp, uint8_t dscp)
+ssl_open(const char *name, char *suffix, struct stream **streamp,
+         uint8_t dscp, int bufsize)
 {
     int error, fd;
 
@@ -370,7 +371,7 @@ ssl_open(const char *name, char *suffix, struct stream **streamp, uint8_t dscp)
     if (fd >= 0) {
         int state = error ? STATE_TCP_CONNECTING : STATE_SSL_CONNECTING;
         return new_ssl_stream(xstrdup(name), get_server_name(suffix),
-                              fd, CLIENT, state, streamp);
+                              fd, CLIENT, state, streamp, bufsize);
     } else {
         VLOG_ERR("%s: connect: %s", name, ovs_strerror(error));
         return error;
@@ -958,7 +959,7 @@ pssl_accept(struct pstream *pstream, struct stream **new_streamp)
     ss_format_address(&ss, &name);
     ds_put_format(&name, ":%"PRIu16, ss_get_port(&ss));
     return new_ssl_stream(ds_steal_cstr(&name), NULL, new_fd, SERVER,
-                          STATE_SSL_CONNECTING, new_streamp);
+                          STATE_SSL_CONNECTING, new_streamp, 512);
 }
 
 static void

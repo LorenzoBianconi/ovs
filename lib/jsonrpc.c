@@ -33,6 +33,7 @@
 #include "svec.h"
 #include "timeval.h"
 #include "openvswitch/vlog.h"
+#include "stream-provider.h"
 
 VLOG_DEFINE_THIS_MODULE(jsonrpc);
 
@@ -43,7 +44,7 @@ struct jsonrpc {
 
     /* Input. */
     struct byteq input;
-    uint8_t input_buffer[512];
+    uint8_t *input_buffer;
     struct json_parser *parser;
 
     /* Output. */
@@ -62,9 +63,10 @@ static void jsonrpc_error(struct jsonrpc *, int error);
 /* This is just the same as stream_open() except that it uses the default
  * JSONRPC port if none is specified. */
 int
-jsonrpc_stream_open(const char *name, struct stream **streamp, uint8_t dscp)
+jsonrpc_stream_open(const char *name, struct stream **streamp,
+                    uint8_t dscp, int bufsize)
 {
-    return stream_open_with_default_port(name, OVSDB_PORT, streamp, dscp);
+    return stream_open_with_default_port(name, OVSDB_PORT, streamp, dscp, bufsize);
 }
 
 /* This is just the same as pstream_open() except that it uses the default
@@ -80,14 +82,16 @@ jsonrpc_pstream_open(const char *name, struct pstream **pstreamp, uint8_t dscp)
 struct jsonrpc *
 jsonrpc_open(struct stream *stream)
 {
+    int bufsize = stream->bufsize > 0 ? stream->bufsize : 512;
     struct jsonrpc *rpc;
 
     ovs_assert(stream != NULL);
 
     rpc = xzalloc(sizeof *rpc);
+    rpc->input_buffer = xzalloc(bufsize);
     rpc->name = xstrdup(stream_get_name(stream));
     rpc->stream = stream;
-    byteq_init(&rpc->input, rpc->input_buffer, sizeof rpc->input_buffer);
+    byteq_init(&rpc->input, rpc->input_buffer, bufsize);
     ovs_list_init(&rpc->output);
 
     return rpc;
@@ -101,6 +105,7 @@ jsonrpc_close(struct jsonrpc *rpc)
     if (rpc) {
         jsonrpc_cleanup(rpc);
         free(rpc->name);
+        free(rpc->input_buffer);
         free(rpc);
     }
 }
@@ -787,6 +792,7 @@ struct jsonrpc_session {
     int last_error;
     unsigned int seqno;
     uint8_t dscp;
+    int bufsize;
 };
 
 static void
@@ -814,11 +820,12 @@ struct jsonrpc_session *
 jsonrpc_session_open(const char *name, bool retry)
 {
     const struct svec remotes = { .names = (char **) &name, .n = 1 };
-    return jsonrpc_session_open_multiple(&remotes, retry);
+    return jsonrpc_session_open_multiple(&remotes, retry, 512);
 }
 
 struct jsonrpc_session *
-jsonrpc_session_open_multiple(const struct svec *remotes, bool retry)
+jsonrpc_session_open_multiple(const struct svec *remotes, bool retry,
+                              int bufsize)
 {
     struct jsonrpc_session *s;
 
@@ -839,6 +846,7 @@ jsonrpc_session_open_multiple(const struct svec *remotes, bool retry)
     s->seqno = 0;
     s->dscp = 0;
     s->last_error = 0;
+    s->bufsize = bufsize;
 
     const char *name = reconnect_get_name(s->reconnect);
     if (!pstream_verify_name(name)) {
@@ -931,7 +939,7 @@ jsonrpc_session_connect(struct jsonrpc_session *s)
 
     jsonrpc_session_disconnect(s);
     if (!reconnect_is_passive(s->reconnect)) {
-        error = jsonrpc_stream_open(name, &s->stream, s->dscp);
+        error = jsonrpc_stream_open(name, &s->stream, s->dscp, s->bufsize);
         if (!error) {
             reconnect_connecting(s->reconnect, time_msec());
         } else {

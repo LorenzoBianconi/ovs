@@ -161,7 +161,7 @@ windows_open(const char *name, char *suffix, struct stream **streamp,
         return ENOENT;
     }
     struct windows_stream *s = xmalloc(sizeof *s);
-    stream_init(&s->stream, &windows_stream_class, 0, xstrdup(name));
+    stream_init(&s->stream, &windows_stream_class, 0, xstrdup(name), 512);
     s->pipe_path = connect_path;
     s->fd = npipe;
     /* This is an active stream. */
@@ -555,7 +555,7 @@ pwindows_accept(struct pstream *pstream, struct stream **new_streamp)
     /* Give the handle p->fd to the new created active stream and specify it
      * was created by an active stream. */
     struct windows_stream *p_temp = xmalloc(sizeof *p_temp);
-    stream_init(&p_temp->stream, &windows_stream_class, 0, xstrdup("unix"));
+    stream_init(&p_temp->stream, &windows_stream_class, 0, xstrdup("unix"), 512);
     p_temp->fd = p->fd;
     /* Specify it was created by a passive stream. */
     p_temp->server = true;

@@ -39,23 +39,25 @@ VLOG_DEFINE_THIS_MODULE(stream_tcp);
 
 /* Takes ownership of 'name'. */
 static int
-new_tcp_stream(char *name, int fd, int connect_status, struct stream **streamp)
+new_tcp_stream(char *name, int fd, int connect_status, struct stream **streamp,
+               int bufsize)
 {
     if (connect_status == 0) {
         setsockopt_tcp_nodelay(fd);
     }
 
-    return new_fd_stream(name, fd, connect_status, AF_INET, streamp);
+    return new_fd_stream(name, fd, connect_status, AF_INET, streamp, bufsize);
 }
 
 static int
-tcp_open(const char *name, char *suffix, struct stream **streamp, uint8_t dscp)
+tcp_open(const char *name, char *suffix, struct stream **streamp,
+         uint8_t dscp, int bufsize)
 {
     int fd, error;
 
     error = inet_open_active(SOCK_STREAM, suffix, -1, NULL, &fd, dscp);
     if (fd >= 0) {
-        return new_tcp_stream(xstrdup(name), fd, error, streamp);
+        return new_tcp_stream(xstrdup(name), fd, error, streamp, bufsize);
     } else {
         VLOG_ERR("%s: connect: %s", name, ovs_strerror(error));
         return error;
@@ -126,7 +128,7 @@ ptcp_accept(int fd, const struct sockaddr_storage *ss,
     ss_format_address(ss, &name);
     ds_put_format(&name, ":%"PRIu16, ss_get_port(ss));
 
-    return new_tcp_stream(ds_steal_cstr(&name), fd, 0, streamp);
+    return new_tcp_stream(ds_steal_cstr(&name), fd, 0, streamp, 512);
 }
 
 const struct pstream_class ptcp_pstream_class = {

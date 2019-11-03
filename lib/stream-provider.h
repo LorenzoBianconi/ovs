@@ -31,10 +31,11 @@ struct stream {
     int error;
     char *name;
     char *peer_id;
+    int bufsize;
 };
 
 void stream_init(struct stream *, const struct stream_class *,
-                 int connect_status, char *name);
+                 int connect_status, char *name, int bufsize);
 static inline void stream_assert_class(const struct stream *stream,
                                        const struct stream_class *class)
 {
@@ -66,7 +67,7 @@ struct stream_class {
      * EAGAIN (not EINPROGRESS, as returned by the connect system call) and
      * continue the connection in the background. */
     int (*open)(const char *name, char *suffix, struct stream **streamp,
-                uint8_t dscp);
+                uint8_t dscp, int bufsize);
 
     /* Closes 'stream' and frees associated memory. */
     void (*close)(struct stream *stream);

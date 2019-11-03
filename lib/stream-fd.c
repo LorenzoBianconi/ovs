@@ -59,12 +59,12 @@ static void maybe_unlink_and_free(char *path);
  * implementation never fails.) */
 int
 new_fd_stream(char *name, int fd, int connect_status, int fd_type,
-              struct stream **streamp)
+              struct stream **streamp, int bufsize)
 {
     struct stream_fd *s;
 
     s = xmalloc(sizeof *s);
-    stream_init(&s->stream, &stream_fd_class, connect_status, name);
+    stream_init(&s->stream, &stream_fd_class, connect_status, name, bufsize);
     s->fd = fd;
     s->fd_type = fd_type;
     *streamp = &s->stream;
