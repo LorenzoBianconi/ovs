@@ -192,7 +192,7 @@ open_rpc(int min_args, enum args_needed need,
      * the first one that is up and hosts the database we want (if any) in an
      * acceptable state. */
     struct jsonrpc_session *js = jsonrpc_session_open_multiple(
-        &remotes, false);
+        &remotes, false, 512);
     svec_destroy(&remotes);
 
     unsigned int seqno = 0;
@@ -505,7 +505,7 @@ open_jsonrpc(const char *server)
     int error;
 
     error = stream_open_block(jsonrpc_stream_open(server, &stream,
-                              DSCP_DEFAULT), -1, &stream);
+                              DSCP_DEFAULT, 512), -1, &stream);
     if (error == EAFNOSUPPORT) {
         struct pstream *pstream;
 

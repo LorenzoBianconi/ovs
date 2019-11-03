@@ -178,7 +178,7 @@ main(int argc, char *argv[])
     /* Initialize IDL. */
     idl = the_idl = ovsdb_idl_create_unconnected(&ovsrec_idl_class, false);
     ovsdb_idl_set_shuffle_remotes(idl, shuffle_remotes);
-    ovsdb_idl_set_remote(idl, db, retry);
+    ovsdb_idl_set_remote(idl, db, retry, 512);
     ovsdb_idl_set_leader_only(idl, leader_only);
     run_prerequisites(commands, n_commands, idl);
 

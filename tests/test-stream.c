@@ -36,7 +36,7 @@ main(int argc, char *argv[])
         ovs_fatal(0, "usage: %s REMOTE", argv[0]);
     }
 
-    error = stream_open_block(stream_open(argv[1], &stream, DSCP_DEFAULT),
+    error = stream_open_block(stream_open(argv[1], &stream, DSCP_DEFAULT, 512),
                               10000, &stream);
     if (error) {
         VLOG_ERR("stream_open_block(%s) failure: %s",

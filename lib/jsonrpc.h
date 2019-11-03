@@ -40,7 +40,8 @@ struct svec;
 #define OVSDB_OLD_PORT 6632
 #define OVSDB_PORT 6640
 
-int jsonrpc_stream_open(const char *name, struct stream **, uint8_t dscp);
+int jsonrpc_stream_open(const char *name, struct stream **, uint8_t dscp,
+                        int bufsize);
 int jsonrpc_pstream_open(const char *name, struct pstream **, uint8_t dscp);
 
 struct jsonrpc *jsonrpc_open(struct stream *);
@@ -105,7 +106,7 @@ char *jsonrpc_msg_to_string(const struct jsonrpc_msg *);
 
 struct jsonrpc_session *jsonrpc_session_open(const char *name, bool retry);
 struct jsonrpc_session *jsonrpc_session_open_multiple(const struct svec *,
-                                                      bool retry);
+                                                      bool retry, int bufsize);
 struct jsonrpc_session *jsonrpc_session_open_unreliably(struct jsonrpc *,
                                                         uint8_t);
 void jsonrpc_session_close(struct jsonrpc_session *);

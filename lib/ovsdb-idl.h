@@ -62,7 +62,7 @@ struct ovsdb_idl *ovsdb_idl_create(const char *remote,
                                    bool retry);
 struct ovsdb_idl *ovsdb_idl_create_unconnected(
     const struct ovsdb_idl_class *, bool monitor_everything_by_default);
-void ovsdb_idl_set_remote(struct ovsdb_idl *, const char *, bool);
+void ovsdb_idl_set_remote(struct ovsdb_idl *, const char *, bool, int);
 void ovsdb_idl_set_shuffle_remotes(struct ovsdb_idl *, bool);
 void ovsdb_idl_destroy(struct ovsdb_idl *);
 

@@ -42,7 +42,7 @@ VLOG_DEFINE_THIS_MODULE(stream_unix);
 
 static int
 unix_open(const char *name, char *suffix, struct stream **streamp,
-          uint8_t dscp OVS_UNUSED)
+          uint8_t dscp OVS_UNUSED, int bufsize)
 {
     char *connect_path;
     int fd;
@@ -59,7 +59,7 @@ unix_open(const char *name, char *suffix, struct stream **streamp,
 
     free(connect_path);
     return new_fd_stream(xstrdup(name), fd, check_connection_completion(fd),
-                         AF_UNIX, streamp);
+                         AF_UNIX, streamp, bufsize);
 }
 
 const struct stream_class unix_stream_class = {
@@ -124,7 +124,7 @@ punix_accept(int fd, const struct sockaddr_storage *ss, size_t ss_len,
         static atomic_count next_idx = ATOMIC_COUNT_INIT(0);
         bound_name = xasprintf("unix#%u", atomic_count_inc(&next_idx));
     }
-    return new_fd_stream(bound_name, fd, 0, AF_UNIX, streamp);
+    return new_fd_stream(bound_name, fd, 0, AF_UNIX, streamp, 512);
 }
 
 const struct pstream_class punix_pstream_class = {
