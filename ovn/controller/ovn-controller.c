@@ -431,13 +431,15 @@ static void
 update_sb_db(struct ovsdb_idl *ovs_idl, struct ovsdb_idl *ovnsb_idl)
 {
     const struct ovsrec_open_vswitch *cfg = ovsrec_open_vswitch_first(ovs_idl);
+    int bufsize = 512;
 
     /* Set remote based on user configuration. */
     const char *remote = NULL;
     if (cfg) {
         remote = smap_get(&cfg->external_ids, "ovn-remote");
+        bufsize = smap_get_int(&cfg->external_ids, "ovn-bufsize", 512);
     }
-    ovsdb_idl_set_remote(ovnsb_idl, remote, true);
+    ovsdb_idl_set_remote(ovnsb_idl, remote, true, bufsize);
 
     /* Set probe interval, based on user configuration and the remote. */
     int default_interval = (remote && !stream_or_pstream_needs_probes(remote)

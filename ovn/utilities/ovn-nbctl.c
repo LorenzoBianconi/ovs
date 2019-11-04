@@ -192,7 +192,7 @@ main(int argc, char *argv[])
     idl = the_idl = ovsdb_idl_create_unconnected(&nbrec_idl_class, true);
     ovsdb_idl_set_shuffle_remotes(idl, shuffle_remotes);
     /* "retry" is true iff in daemon mode. */
-    ovsdb_idl_set_remote(idl, db, daemon_mode);
+    ovsdb_idl_set_remote(idl, db, daemon_mode, 512);
     ovsdb_idl_set_leader_only(idl, leader_only);
 
     if (daemon_mode) {
