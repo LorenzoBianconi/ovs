@@ -2988,6 +2988,10 @@ prepare_ipv6_prefix_req(struct ovsdb_idl_index *sbrec_port_binding_by_datapath,
                 continue;
             }
 
+            if (strcmp(pb->type, "chassisredirect")) {
+                continue;
+            }
+
             const char *peer_s = smap_get(&pb->options, "peer");
             if (!peer_s) {
                 continue;
