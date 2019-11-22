@@ -2866,6 +2866,25 @@ send_ipv6_prefixd(struct rconn *swconn, long long int *send_prefixd_time)
     }
 }
 
+static bool
+pinctrl_is_chassis_resident(struct ovsdb_idl_index *sbrec_port_binding_by_name,
+                            const struct sbrec_chassis *chassis,
+                            const struct sset *active_tunnels,
+                            const char *port_name)
+{
+    const struct sbrec_port_binding *pb
+        = lport_lookup_by_name(sbrec_port_binding_by_name, port_name);
+    if (!pb || !pb->chassis) {
+        return false;
+    }
+    if (strcmp(pb->type, "chassisredirect")) {
+        return pb->chassis == chassis;
+    } else {
+        return ha_chassis_group_is_active(pb->ha_chassis_group,
+                                          active_tunnels, chassis);
+    }
+}
+
 /* Called by pinctrl_run(). Runs with in the main ovn-controller
  * thread context. */
 static void
@@ -3061,7 +3080,7 @@ prepare_ipv6_prefixd_req(
             }
 
             char *redirect_name = xasprintf("cr-%s", pb->logical_port);
-            bool resident = lport_is_chassis_resident(
+            bool resident = pinctrl_is_chassis_resident(
                     sbrec_port_binding_by_name, chassis, active_tunnels,
                     redirect_name);
             free(redirect_name);
@@ -4345,25 +4364,6 @@ get_localnet_vifs_l3gwports(
         }
     }
     sbrec_port_binding_index_destroy_row(target);
-}
-
-static bool
-pinctrl_is_chassis_resident(struct ovsdb_idl_index *sbrec_port_binding_by_name,
-                            const struct sbrec_chassis *chassis,
-                            const struct sset *active_tunnels,
-                            const char *port_name)
-{
-    const struct sbrec_port_binding *pb
-        = lport_lookup_by_name(sbrec_port_binding_by_name, port_name);
-    if (!pb || !pb->chassis) {
-        return false;
-    }
-    if (strcmp(pb->type, "chassisredirect")) {
-        return pb->chassis == chassis;
-    } else {
-        return ha_chassis_group_is_active(pb->ha_chassis_group,
-                                          active_tunnels, chassis);
-    }
 }
 
 /* Extracts the mac, IPv4 and IPv6 addresses, and logical port from
