@@ -87,7 +87,6 @@ struct raft_conn {
     char *nickname;             /* Short name for use in log messages. */
     bool incoming;              /* True if incoming, false if outgoing. */
     unsigned int js_seqno;      /* Seqno for noticing (re)connections. */
-    long long int connect_ts;   /* Connections timestamp (ms) */
 };
 
 static void raft_conn_close(struct raft_conn *);
@@ -945,7 +944,6 @@ raft_add_conn(struct raft *raft, struct jsonrpc_session *js,
     conn->nickname = raft_address_to_nickname(jsonrpc_session_get_name(js),
                                               &conn->sid);
     conn->incoming = incoming;
-    conn->connect_ts = time_msec();
     conn->js_seqno = jsonrpc_session_get_seqno(conn->js);
     jsonrpc_session_set_probe_interval(js, 0);
 }
@@ -3028,6 +3026,11 @@ static void
 raft_handle_append_request(struct raft *raft,
                            const struct raft_append_request *rq)
 {
+    struct raft_server *s = raft_find_server(raft, &rq->common.sid);
+    if (s) {
+        s->last_msg_ts = time_msec();
+    }
+
     /* We do not check whether the server that sent the request is part of the
      * cluster.  As section 4.1 says, "A server accepts AppendEntries requests
      * from a leader that is not part of the server’s latest configuration.
@@ -3370,6 +3373,8 @@ raft_handle_append_reply(struct raft *raft,
             return;
         }
     }
+
+    s->last_msg_ts = time_msec();
 
     s->replied = true;
     if (rpy->result == RAFT_APPEND_OK) {
@@ -4516,10 +4521,9 @@ raft_unixctl_status(struct unixctl_conn *conn,
     ds_put_cstr(&s, "Connections:");
     LIST_FOR_EACH (c, list_node, &raft->conns) {
         bool connected = jsonrpc_session_is_connected(c->js);
-        ds_put_format(&s, " %s%s%s [%"PRIu64"ms] %s",
+        ds_put_format(&s, " %s%s%s%s",
                       connected ? "" : "(",
                       c->incoming ? "<-" : "->", c->nickname,
-                      (uint64_t)(c->connect_ts - time_boot_msec()),
                       connected ? "" : ")");
     }
     ds_put_char(&s, '\n');
@@ -4549,6 +4553,10 @@ raft_unixctl_status(struct unixctl_conn *conn,
         } else if (raft->role == RAFT_LEADER) {
             ds_put_format(&s, " next_index=%"PRIu64" match_index=%"PRIu64,
                           server->next_index, server->match_index);
+        }
+        if (server->last_msg_ts) {
+            ds_put_format(&s, " last rx msg %"PRIu64"ms",
+                          (uint64_t) (time_now() - server->last_msg_ts));
         }
         ds_put_char(&s, '\n');
     }
