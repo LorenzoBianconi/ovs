@@ -1695,7 +1695,7 @@ raft_start_election(struct raft *raft, bool leadership_transfer)
 
     raft->n_votes = 0;
 
-    raft->election_start = time_msec();
+    raft->election_start = time_now();
     raft->leadership_transfer = leadership_transfer;
 
     static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 5);
@@ -2587,7 +2587,7 @@ raft_become_leader(struct raft *raft)
 
     ovs_assert(raft->role != RAFT_LEADER);
     raft->role = RAFT_LEADER;
-    raft->election_complete = time_msec();
+    raft->election_complete = time_now();
     raft_set_leader(raft, &raft->sid);
     raft_reset_election_timer(raft);
     raft_reset_ping_timer(raft);
@@ -4487,14 +4487,14 @@ raft_unixctl_status(struct unixctl_conn *conn,
     ds_put_char(&s, '\n');
 
     if (raft->election_start) {
-        ds_put_format(&s, "Election started: %"PRIu64"ms reason: %s\n",
-                      (uint64_t) (time_msec() - raft->election_start),
+        ds_put_format(&s, "Election started: %"PRIu64"s reason: %s\n",
+                      (uint64_t) (time_now() - raft->election_start),
                       raft->leadership_transfer ?
                       "leadership_transfer" : "timeout");
     }
     if (raft->election_complete) {
-        ds_put_format(&s, "Election completed: %"PRIu64"ms\n",
-                      (uint64_t) (time_msec() - raft->election_complete));
+        ds_put_format(&s, "Election completed: %"PRIu64"s\n",
+                      (uint64_t) (time_now() - raft->election_complete));
     }
     ds_put_format(&s, "Election timer: %"PRIu64, raft->election_timer);
     if (raft->role == RAFT_LEADER && raft->election_timer_new) {
