@@ -4555,8 +4555,8 @@ raft_unixctl_status(struct unixctl_conn *conn,
                           server->next_index, server->match_index);
         }
         if (server->last_msg_ts) {
-            ds_put_format(&s, " last rx msg %"PRIu64"ms",
-                          (uint64_t) (time_now() - server->last_msg_ts));
+            ds_put_format(&s, " last msg %"PRIu64"ms",
+                          (uint64_t) (time_msec() - server->last_msg_ts));
         }
         ds_put_char(&s, '\n');
     }
