@@ -4488,13 +4488,13 @@ raft_unixctl_status(struct unixctl_conn *conn,
 
     if (raft->election_start) {
         ds_put_format(&s, "Election started: %"PRIu64"ms reason: %s\n",
-                      (uint64_t)(raft->election_start - time_boot_msec()),
+                      (uint64_t) (time_msec() - raft->election_start),
                       raft->leadership_transfer ?
                       "leadership_transfer" : "timeout");
     }
     if (raft->election_complete) {
         ds_put_format(&s, "Election completed: %"PRIu64"ms\n",
-                      (uint64_t)(raft->election_complete - time_boot_msec()));
+                      (uint64_t) (time_msec() - raft->election_complete));
     }
     ds_put_format(&s, "Election timer: %"PRIu64, raft->election_timer);
     if (raft->role == RAFT_LEADER && raft->election_timer_new) {
