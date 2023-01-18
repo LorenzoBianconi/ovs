@@ -489,6 +489,22 @@ mcast_snooping_add_report(struct mcast_snooping *ms,
     return count;
 }
 
+static bool
+mcast_snooping_should_learn_mld_group(struct in6_addr *addr)
+{
+    /* we should learn multicast group from the following IPv6 multicast
+     * groups:
+     * - All Nodes Address       (ff02::1)
+     * - All Router Address      (ff02::2)
+     * - All Site Router Address (ff05::2)
+     * - Solicited-Node Address  (ff02::1:ff00:0000/104)
+     */
+    return !in6_addr_is_solicited_node(addr) &&
+           !ipv6_is_all_hosts(addr) &&
+           !ipv6_is_all_router(addr) &&
+           !ipv6_is_all_site_router(addr);
+}
+
 int
 mcast_snooping_add_mld(struct mcast_snooping *ms,
                           const struct dp_packet *p,
@@ -530,27 +546,35 @@ mcast_snooping_add_mld(struct mcast_snooping *ms,
             if (!record) {
                 break;
             }
+
             /* Only consider known record types. */
-            if (record->type >= IGMPV3_MODE_IS_INCLUDE
-                && record->type <= IGMPV3_BLOCK_OLD_SOURCES) {
-                struct in6_addr maddr;
-                memcpy(maddr.s6_addr, record->maddr.be16, 16);
-                addr = &maddr;
-                /*
-                 * If record is INCLUDE MODE and there are no sources, it's
-                 * equivalent to a LEAVE.
-                 */
-                if (record->nsrcs == htons(0)
-                    && (record->type == IGMPV3_MODE_IS_INCLUDE
-                        || record->type == IGMPV3_CHANGE_TO_INCLUDE_MODE)) {
-                    ret = mcast_snooping_leave_group(ms, addr, vlan, port);
-                } else {
-                    ret = mcast_snooping_add_group(ms, addr, vlan, port);
-                }
-                if (ret) {
-                    count++;
-                }
+            if (record->type < IGMPV3_MODE_IS_INCLUDE ||
+                record->type > IGMPV3_BLOCK_OLD_SOURCES) {
+                goto next;
             }
+
+            struct in6_addr maddr;
+            memcpy(maddr.s6_addr, record->maddr.be16, 16);
+            if (!mcast_snooping_should_learn_mld_group(&maddr)) {
+                goto next;
+            }
+
+            /*
+             * If record is INCLUDE MODE and there are no sources, it's
+             * equivalent to a LEAVE.
+             */
+            addr = &maddr;
+            if (record->nsrcs == htons(0)
+                && (record->type == IGMPV3_MODE_IS_INCLUDE
+                    || record->type == IGMPV3_CHANGE_TO_INCLUDE_MODE)) {
+                ret = mcast_snooping_leave_group(ms, addr, vlan, port);
+            } else {
+                ret = mcast_snooping_add_group(ms, addr, vlan, port);
+            }
+            if (ret) {
+                count++;
+            }
+next:
             offset += sizeof(*record)
                       + ntohs(record->nsrcs) * sizeof(struct in6_addr)
                       + record->aux_len;
