@@ -412,12 +412,6 @@ ovsdb_cs_retry_at(struct ovsdb_cs *cs, const char *where)
 static void
 ovsdb_cs_restart_fsm(struct ovsdb_cs *cs)
 {
-    /* Resync data DB table conditions to avoid missing updates due to
-     * conditions that were in flight or changed locally while the connection
-     * was down.
-     */
-    ovsdb_cs_db_sync_condition(&cs->data);
-
     ovsdb_cs_send_schema_request(cs, &cs->server);
     ovsdb_cs_transition(cs, CS_S_SERVER_SCHEMA_REQUESTED);
     cs->data.monitor_version = 0;
